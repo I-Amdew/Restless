@@ -232,19 +232,13 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         guard let button = statusItem?.button else { return }
 
         let pillColor = statusPillColor
-        statusItem?.length = pillColor == nil ? NSStatusItem.squareLength : 48
+        statusItem?.length = NSStatusItem.squareLength
 
         button.wantsLayer = true
-        button.layer?.cornerRadius = 12
+        button.layer?.cornerRadius = pillColor == nil ? 0 : NSStatusBar.system.thickness / 2
         button.layer?.masksToBounds = true
         button.layer?.backgroundColor = pillColor?.cgColor
-        if pillColor == nil {
-            button.image = NSImage(systemSymbolName: "display", accessibilityDescription: "Restless")
-                ?? NSImage(systemSymbolName: "display", accessibilityDescription: "Restless")
-            button.image?.isTemplate = true
-        } else {
-            button.image = displayIconImage(color: .white)
-        }
+        button.image = statusItemImage(tintColor: pillColor == nil ? nil : .white)
         button.imagePosition = .imageOnly
         button.title = ""
         button.contentTintColor = nil
@@ -252,28 +246,19 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         button.toolTip = statusToolTip
     }
 
-    private func displayIconImage(color: NSColor) -> NSImage {
-        let image = NSImage(size: NSSize(width: 18, height: 18))
-        image.lockFocus()
+    private func statusItemImage(tintColor: NSColor?) -> NSImage? {
+        let configuration = NSImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+        let image = NSImage(systemSymbolName: "display", accessibilityDescription: "Restless")?
+            .withSymbolConfiguration(configuration)
 
-        color.setStroke()
+        guard let tintColor else {
+            image?.isTemplate = true
+            return image
+        }
 
-        let screenPath = NSBezierPath(roundedRect: NSRect(x: 2.5, y: 6.0, width: 13.0, height: 8.5), xRadius: 1.4, yRadius: 1.4)
-        screenPath.lineWidth = 1.9
-        screenPath.stroke()
-
-        let standPath = NSBezierPath()
-        standPath.lineWidth = 1.9
-        standPath.lineCapStyle = .round
-        standPath.move(to: NSPoint(x: 9.0, y: 5.8))
-        standPath.line(to: NSPoint(x: 9.0, y: 2.9))
-        standPath.move(to: NSPoint(x: 5.7, y: 2.6))
-        standPath.line(to: NSPoint(x: 12.3, y: 2.6))
-        standPath.stroke()
-
-        image.unlockFocus()
-        image.isTemplate = false
-        return image
+        let tintedImage = image?.withSymbolConfiguration(.init(hierarchicalColor: tintColor)) ?? image
+        tintedImage?.isTemplate = false
+        return tintedImage
     }
 
     private var statusPillColor: NSColor? {
@@ -467,15 +452,9 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     private func launchAtLoginMenuItem() -> NSMenuItem {
-        let item = NSMenuItem()
-        item.view = ToggleRowView(
-            symbolName: "arrow.clockwise",
-            title: "Start at Login",
-            subtitle: "Open Restless automatically",
-            isEnabled: launchAtLoginController.isEnabled,
-            target: self,
-            action: #selector(toggleLaunchAtLogin(_:))
-        )
+        let item = NSMenuItem(title: "Start at Login", action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
+        item.target = self
+        item.state = launchAtLoginController.isEnabled ? .on : .off
         return item
     }
 
@@ -647,8 +626,8 @@ private final class HeaderMenuItemView: NSView {
         detailLabel.frame = NSRect(x: 18, y: 12, width: 188, height: 16)
         addSubview(detailLabel)
 
-        let toggle = MenuSwitchControl(frame: NSRect(x: 224, y: 16, width: 52, height: 32))
-        toggle.isOn = isEnabled
+        let toggle = NSSwitch(frame: NSRect(x: 224, y: 16, width: 52, height: 32))
+        toggle.state = isEnabled ? .on : .off
         toggle.target = target
         toggle.action = action
         addSubview(toggle)
@@ -717,91 +696,6 @@ private final class StatusRowView: NSView {
 
     required init?(coder: NSCoder) {
         nil
-    }
-}
-
-private final class ToggleRowView: NSView {
-    init(
-        symbolName: String,
-        title: String,
-        subtitle: String,
-        isEnabled: Bool,
-        target: AnyObject,
-        action: Selector
-    ) {
-        super.init(frame: NSRect(x: 0, y: 0, width: 292, height: 50))
-
-        let iconBackground = NSView(frame: NSRect(x: 18, y: 8, width: 34, height: 34))
-        iconBackground.wantsLayer = true
-        iconBackground.layer?.cornerRadius = 17
-        iconBackground.layer?.backgroundColor = NSColor.tertiaryLabelColor.withAlphaComponent(0.18).cgColor
-        addSubview(iconBackground)
-
-        let icon = NSImageView(frame: NSRect(x: 25, y: 15, width: 20, height: 20))
-        icon.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
-        icon.contentTintColor = .secondaryLabelColor
-        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
-        addSubview(icon)
-
-        let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 14, weight: .medium)
-        titleLabel.textColor = .labelColor
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.frame = NSRect(x: 64, y: 25, width: 148, height: 18)
-        addSubview(titleLabel)
-
-        let subtitleLabel = NSTextField(labelWithString: subtitle)
-        subtitleLabel.font = .systemFont(ofSize: 11, weight: .regular)
-        subtitleLabel.textColor = .secondaryLabelColor
-        subtitleLabel.lineBreakMode = .byTruncatingTail
-        subtitleLabel.frame = NSRect(x: 64, y: 8, width: 148, height: 15)
-        addSubview(subtitleLabel)
-
-        let toggle = MenuSwitchControl(frame: NSRect(x: 224, y: 9, width: 52, height: 32))
-        toggle.isOn = isEnabled
-        toggle.target = target
-        toggle.action = action
-        addSubview(toggle)
-    }
-
-    required init?(coder: NSCoder) {
-        nil
-    }
-}
-
-private final class MenuSwitchControl: NSControl {
-    var isOn = false {
-        didSet {
-            needsDisplay = true
-        }
-    }
-
-    override var acceptsFirstResponder: Bool {
-        true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let trackRect = bounds.insetBy(dx: 2, dy: 4)
-        let trackPath = NSBezierPath(roundedRect: trackRect, xRadius: trackRect.height / 2, yRadius: trackRect.height / 2)
-
-        (isOn ? NSColor.systemBlue : NSColor.controlColor).setFill()
-        trackPath.fill()
-
-        let borderColor = isOn ? NSColor.systemBlue : NSColor.separatorColor
-        borderColor.setStroke()
-        trackPath.lineWidth = 0.5
-        trackPath.stroke()
-
-        let knobDiameter = trackRect.height - 4
-        let knobX = isOn ? trackRect.maxX - knobDiameter - 2 : trackRect.minX + 2
-        let knobRect = NSRect(x: knobX, y: trackRect.minY + 2, width: knobDiameter, height: knobDiameter)
-        NSColor.white.setFill()
-        NSBezierPath(ovalIn: knobRect).fill()
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        isOn.toggle()
-        _ = target?.perform(action, with: self)
     }
 }
 
