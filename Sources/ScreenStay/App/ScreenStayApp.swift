@@ -231,28 +231,25 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     private func updateStatusItem(isWorking: Bool = false) {
         guard let button = statusItem?.button else { return }
 
-        button.image = statusItemImage()
+        let pillColor = statusPillColor
+        statusItem?.length = pillColor == nil ? NSStatusItem.squareLength : 48
+
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 12
+        button.layer?.masksToBounds = true
+        button.layer?.backgroundColor = pillColor?.cgColor
+        if pillColor == nil {
+            button.image = NSImage(systemSymbolName: "display", accessibilityDescription: "Restless")
+                ?? NSImage(systemSymbolName: "display", accessibilityDescription: "Restless")
+            button.image?.isTemplate = true
+        } else {
+            button.image = displayIconImage(color: .white)
+        }
         button.imagePosition = .imageOnly
         button.title = ""
         button.contentTintColor = nil
-        button.alphaValue = isWorking || toggleController.isEnabled ? 1.0 : 0.62
+        button.alphaValue = 1.0
         button.toolTip = statusToolTip
-    }
-
-    private func statusItemImage() -> NSImage? {
-        if toggleController.shouldUseWarningIcon {
-            return displayIconImage(color: .systemOrange)
-        }
-
-        if toggleController.isEnabled {
-            return displayIconImage(color: .systemBlue)
-        }
-
-        do {
-            let image = NSImage(systemSymbolName: "display", accessibilityDescription: "Restless")
-            image?.isTemplate = true
-            return image
-        }
     }
 
     private func displayIconImage(color: NSColor) -> NSImage {
@@ -277,6 +274,18 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         image.unlockFocus()
         image.isTemplate = false
         return image
+    }
+
+    private var statusPillColor: NSColor? {
+        if toggleController.shouldUseWarningIcon {
+            return .systemOrange
+        }
+
+        if toggleController.isEnabled {
+            return .systemBlue
+        }
+
+        return nil
     }
 
     private var statusToolTip: String {
