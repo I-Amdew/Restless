@@ -17,7 +17,7 @@ It is designed for cases like moving around with a MacBook closed while a downlo
 
 ## Download
 
-Download the latest `Restless.zip` from [Releases](../../releases/latest), unzip it, and move `Restless.app` to `/Applications`.
+Download [`Restless.zip`](dist/Restless.zip), unzip it, and move `Restless.app` to `/Applications`.
 
 The app is not notarized yet. If macOS blocks it the first time:
 
