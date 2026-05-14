@@ -90,6 +90,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     @objc private func toggleLaunchAtLogin(_ sender: Any) {
         do {
             try launchAtLoginController.setEnabled(!launchAtLoginController.isEnabled)
+            (sender as? CheckmarkMenuItemView)?.isChecked = launchAtLoginController.isEnabled
         } catch {
             presentError(error, title: "Restless could not update startup")
         }
@@ -452,9 +453,13 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     private func launchAtLoginMenuItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "Start at Login", action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
-        item.target = self
-        item.state = launchAtLoginController.isEnabled ? .on : .off
+        let item = NSMenuItem()
+        item.view = CheckmarkMenuItemView(
+            title: "Start at Login",
+            isChecked: launchAtLoginController.isEnabled,
+            target: self,
+            action: #selector(toggleLaunchAtLogin(_:))
+        )
         return item
     }
 
@@ -692,6 +697,45 @@ private final class StatusRowView: NSView {
             trailingLabel.frame = NSRect(x: 210, y: 25, width: 64, height: 18)
             addSubview(trailingLabel)
         }
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+}
+
+private final class CheckmarkMenuItemView: NSControl {
+    private let checkmarkView = NSImageView()
+
+    var isChecked: Bool {
+        didSet {
+            checkmarkView.isHidden = !isChecked
+        }
+    }
+
+    init(title: String, isChecked: Bool, target: AnyObject, action: Selector) {
+        self.isChecked = isChecked
+        super.init(frame: NSRect(x: 0, y: 0, width: 292, height: 32))
+
+        self.target = target
+        self.action = action
+
+        checkmarkView.frame = NSRect(x: 20, y: 7, width: 18, height: 18)
+        checkmarkView.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: title)
+        checkmarkView.contentTintColor = .labelColor
+        checkmarkView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        checkmarkView.isHidden = !isChecked
+        addSubview(checkmarkView)
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 14, weight: .medium)
+        titleLabel.textColor = .labelColor
+        titleLabel.frame = NSRect(x: 44, y: 7, width: 230, height: 18)
+        addSubview(titleLabel)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        _ = target?.perform(action, with: self)
     }
 
     required init?(coder: NSCoder) {
