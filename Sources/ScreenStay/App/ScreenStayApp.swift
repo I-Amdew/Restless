@@ -231,14 +231,42 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     private func updateStatusItem(isWorking: Bool = false) {
         guard let button = statusItem?.button else { return }
 
-        button.image = NSImage(systemSymbolName: "display", accessibilityDescription: "Restless")
-            ?? NSImage(systemSymbolName: "display", accessibilityDescription: "Restless")
-        button.image?.isTemplate = true
+        button.image = statusItemImage()
         button.imagePosition = .imageOnly
         button.title = ""
-        button.contentTintColor = toggleController.shouldUseWarningIcon ? .systemOrange : nil
+        button.contentTintColor = nil
         button.alphaValue = isWorking || toggleController.isEnabled ? 1.0 : 0.62
         button.toolTip = statusToolTip
+    }
+
+    private func statusItemImage() -> NSImage? {
+        guard toggleController.shouldUseWarningIcon else {
+            let image = NSImage(systemSymbolName: "display", accessibilityDescription: "Restless")
+            image?.isTemplate = true
+            return image
+        }
+
+        let image = NSImage(size: NSSize(width: 18, height: 18))
+        image.lockFocus()
+
+        NSColor.systemOrange.setStroke()
+
+        let screenPath = NSBezierPath(roundedRect: NSRect(x: 2.5, y: 6.0, width: 13.0, height: 8.5), xRadius: 1.4, yRadius: 1.4)
+        screenPath.lineWidth = 1.9
+        screenPath.stroke()
+
+        let standPath = NSBezierPath()
+        standPath.lineWidth = 1.9
+        standPath.lineCapStyle = .round
+        standPath.move(to: NSPoint(x: 9.0, y: 5.8))
+        standPath.line(to: NSPoint(x: 9.0, y: 2.9))
+        standPath.move(to: NSPoint(x: 5.7, y: 2.6))
+        standPath.line(to: NSPoint(x: 12.3, y: 2.6))
+        standPath.stroke()
+
+        image.unlockFocus()
+        image.isTemplate = false
+        return image
     }
 
     private var statusToolTip: String {
@@ -246,12 +274,12 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             return "Restless: checking sleep status"
         }
 
-        if toggleController.isBatteryCutoffReached {
-            return "Restless on: battery cutoff reached"
+        if isPausedByBatteryCutoff {
+            return "Restless paused: battery is at or below the \(batteryLimitTitle()) cutoff."
         }
 
-        if toggleController.isWaitingForNextLidOpen {
-            return "Restless on: sleeping until lid opens"
+        if isPausedAfterClosedLidLimit {
+            return "Restless paused: closed-lid limit reached. It will re-arm when the lid opens."
         }
 
         return toggleController.isEnabled ? "Restless on: sleep disabled" : "Restless off: normal sleep"
@@ -309,12 +337,12 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             return "Checking sleep status"
         }
 
-        if toggleController.isBatteryCutoffReached {
-            return "Battery cutoff reached"
+        if isPausedByBatteryCutoff {
+            return "Paused: battery below \(batteryLimitTitle())"
         }
 
-        if toggleController.isWaitingForNextLidOpen {
-            return "Sleeping until lid opens"
+        if isPausedAfterClosedLidLimit {
+            return "Paused until lid opens"
         }
 
         return toggleController.isEnabled ? "Closed-lid keep-awake is on" : "Normal sleep"
@@ -369,24 +397,24 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             return "Checking status"
         }
 
-        if toggleController.isBatteryCutoffReached {
-            return "Battery cutoff reached"
+        if isPausedByBatteryCutoff {
+            return "Battery too low"
         }
 
-        if toggleController.isWaitingForNextLidOpen {
-            return "Sleeping until lid opens"
+        if isPausedAfterClosedLidLimit {
+            return "Close limit reached"
         }
 
         return toggleController.isEnabled ? "Sleep prevented" : "Normal sleep"
     }
 
     private var statusSubtitle: String {
-        if toggleController.isBatteryCutoffReached {
-            return "Will sleep closed at \(batteryLimitTitle()) or below"
+        if isPausedByBatteryCutoff {
+            return "At/below \(batteryLimitTitle()); keep-awake paused"
         }
 
-        if toggleController.isWaitingForNextLidOpen {
-            return "Restless stays on for the next close"
+        if isPausedAfterClosedLidLimit {
+            return "Will re-arm when the lid opens"
         }
 
         return "\(toggleController.powerSource) · Lid \(toggleController.isLidClosed ? "Closed" : "Open")"
@@ -398,6 +426,14 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         }
 
         return toggleController.isEnabled ? .systemBlue : .tertiaryLabelColor
+    }
+
+    private var isPausedByBatteryCutoff: Bool {
+        toggleController.isEnabled && toggleController.isBatteryCutoffReached
+    }
+
+    private var isPausedAfterClosedLidLimit: Bool {
+        toggleController.isEnabled && toggleController.isWaitingForNextLidOpen
     }
 
     private func splitMenuMetric(_ value: String) -> (title: String, detail: String) {
