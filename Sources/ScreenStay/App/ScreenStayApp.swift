@@ -1,9 +1,12 @@
 import AppKit
+import IOKit.ps
 
 final class RestlessApp: NSObject, NSApplicationDelegate {
     private let toggleController = SleepToggleController()
     private var statusItem: NSStatusItem?
     private var monitorTimer: Timer?
+    private var limitTimer: Timer?
+    private var powerSourceRunLoopSource: CFRunLoopSource?
     private var isAutomaticSleepInProgress = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -21,10 +24,16 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         toggleController.refresh()
         runMonitoringPass(enforceLimits: false)
         startMonitoring()
+        startSystemEventMonitoring()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
         monitorTimer?.invalidate()
+        limitTimer?.invalidate()
+        if let powerSourceRunLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), powerSourceRunLoopSource, .defaultMode)
+        }
         statusItem = nil
     }
 
@@ -90,11 +99,12 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     private func enterClosedLidSleepAfterLimit() {
+        limitTimer?.invalidate()
         updateStatusItem(isWorking: true)
 
         toggleController.pauseForClosedLidLimit { [weak self] result in
             guard let self else { return }
-            self.updateStatusItem()
+            self.runMonitoringPass(enforceLimits: false)
 
             switch result {
             case .success:
@@ -115,6 +125,52 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func startSystemEventMonitoring() {
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        workspaceCenter.addObserver(
+            self,
+            selector: #selector(systemStateChanged(_:)),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+        workspaceCenter.addObserver(
+            self,
+            selector: #selector(systemStateChanged(_:)),
+            name: NSWorkspace.screensDidWakeNotification,
+            object: nil
+        )
+        workspaceCenter.addObserver(
+            self,
+            selector: #selector(systemStateChanged(_:)),
+            name: NSWorkspace.screensDidSleepNotification,
+            object: nil
+        )
+        workspaceCenter.addObserver(
+            self,
+            selector: #selector(systemStateChanged(_:)),
+            name: NSWorkspace.willSleepNotification,
+            object: nil
+        )
+
+        let context = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        guard let source = IOPSNotificationCreateRunLoopSource({ context in
+            guard let context else { return }
+            let app = Unmanaged<RestlessApp>.fromOpaque(context).takeUnretainedValue()
+            DispatchQueue.main.async {
+                app.runMonitoringPass(enforceLimits: true)
+            }
+        }, context)?.takeRetainedValue() else {
+            return
+        }
+
+        powerSourceRunLoopSource = source
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
+    }
+
+    @objc private func systemStateChanged(_ notification: Notification) {
+        runMonitoringPass(enforceLimits: true)
+    }
+
     private func handleSettingsChange() {
         runMonitoringPass(enforceLimits: true)
     }
@@ -122,6 +178,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     private func runMonitoringPass(enforceLimits: Bool) {
         toggleController.monitor()
         updateStatusItem()
+        scheduleLimitTimer()
 
         if toggleController.shouldResumeAfterClosedLidSleep {
             toggleController.markResumingAfterClosedLidSleep()
@@ -135,6 +192,19 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func scheduleLimitTimer() {
+        limitTimer?.invalidate()
+        limitTimer = nil
+
+        guard toggleController.shouldScheduleCloseLimitTimer else { return }
+
+        let interval = max(1, toggleController.closedLimitRemainingSeconds)
+        limitTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(interval), repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.runMonitoringPass(enforceLimits: true)
+        }
+    }
+
     private func updateStatusItem(isWorking: Bool = false) {
         guard let button = statusItem?.button else { return }
 
@@ -143,11 +213,25 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         button.image?.isTemplate = true
         button.imagePosition = .imageOnly
         button.title = ""
-        button.contentTintColor = nil
+        button.contentTintColor = toggleController.shouldUseWarningIcon ? .systemOrange : nil
         button.alphaValue = isWorking || toggleController.isEnabled ? 1.0 : 0.62
-        button.toolTip = toggleController.isStatusKnown
-            ? (toggleController.isEnabled ? "Restless on: sleep disabled" : "Restless off: normal sleep")
-            : "Restless: checking sleep status"
+        button.toolTip = statusToolTip
+    }
+
+    private var statusToolTip: String {
+        guard toggleController.isStatusKnown else {
+            return "Restless: checking sleep status"
+        }
+
+        if toggleController.isBatteryCutoffReached {
+            return "Restless on: battery cutoff reached"
+        }
+
+        if toggleController.isWaitingForNextLidOpen {
+            return "Restless on: sleeping until lid opens"
+        }
+
+        return toggleController.isEnabled ? "Restless on: sleep disabled" : "Restless off: normal sleep"
     }
 
     private func showMenu() {

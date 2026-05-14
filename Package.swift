@@ -13,7 +13,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "Restless",
-            path: "Sources/ScreenStay"
+            path: "Sources/ScreenStay",
+            linkerSettings: [
+                .linkedFramework("IOKit")
+            ]
         )
     ]
 )

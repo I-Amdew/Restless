@@ -12,6 +12,8 @@ It is designed for cases like moving around with a MacBook closed while a downlo
 - Optional close timer, such as 15 minutes, 30 minutes, 1 hour, or custom.
 - Optional battery cutoff, such as 20%, 40%, or custom.
 - Last closed-lid session metrics with time and battery used.
+- Event-based battery, wake, screen-sleep, and screen-wake tracking with a polling fallback.
+- Orange menu bar icon when Restless is enabled but the battery cutoff means it will not keep the Mac awake closed.
 - Launch-at-login script.
 - Optional passwordless setup for the exact `pmset` toggle Restless needs.
 
@@ -67,6 +69,8 @@ To start Restless automatically when you log in:
 5. Close the lid.
 
 When Restless is on, it keeps the Mac awake while closed. If the close timer or battery cutoff is reached, Restless lets the Mac sleep for that closed-lid session but stays enabled for the next time you close the lid.
+
+Restless watches macOS power-source and wake events, so the menu updates when the battery changes, when the close timer expires, and when the lid opens again. The close timer resets every time a new closed-lid session starts. If the battery is already at or below your cutoff, the menu bar icon turns orange to show that closed-lid keep-awake will pause until the battery is above the limit or the cutoff is changed.
 
 The menu shows:
 

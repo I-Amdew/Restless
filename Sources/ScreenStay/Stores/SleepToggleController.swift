@@ -48,30 +48,46 @@ final class SleepToggleController {
     var shouldStopForLimit: Bool {
         guard isEnabled, !isPausedForClosedLidSleep else { return false }
 
-        if isLidClosed,
-           powerSource == "Battery",
-           let batteryPercent,
-           batteryFloorPercent > 0,
-           batteryPercent <= batteryFloorPercent {
+        if isLidClosed, isBatteryCutoffReached {
             return true
         }
 
-        if sessionLimitMinutes > 0,
-           isLidClosed,
-           let closedSince,
-           Date().timeIntervalSince(closedSince) >= TimeInterval(sessionLimitMinutes * 60) {
+        if shouldScheduleCloseLimitTimer, closedLimitRemainingSeconds <= 0 {
             return true
         }
 
         return false
     }
 
-    var closedLimitRemainingText: String? {
-        guard isEnabled, isLidClosed, sessionLimitMinutes > 0, let closedSince else { return nil }
+    var isBatteryCutoffReached: Bool {
+        powerSource == "Battery"
+            && batteryFloorPercent > 0
+            && batteryPercent.map { $0 <= batteryFloorPercent } == true
+    }
+
+    var isWaitingForNextLidOpen: Bool {
+        isPausedForClosedLidSleep && rememberedEnabled
+    }
+
+    var shouldUseWarningIcon: Bool {
+        isEnabled && (isBatteryCutoffReached || isWaitingForNextLidOpen)
+    }
+
+    var shouldScheduleCloseLimitTimer: Bool {
+        isEnabled && !isPausedForClosedLidSleep && isLidClosed && sessionLimitMinutes > 0 && closedSince != nil
+    }
+
+    var closedLimitRemainingSeconds: Int {
+        guard shouldScheduleCloseLimitTimer, let closedSince else { return 0 }
 
         let total = TimeInterval(sessionLimitMinutes * 60)
-        let remaining = max(0, Int(total - Date().timeIntervalSince(closedSince)))
-        return "Time left: \(formatDuration(TimeInterval(remaining)))"
+        return max(0, Int(ceil(total - Date().timeIntervalSince(closedSince))))
+    }
+
+    var closedLimitRemainingText: String? {
+        guard shouldScheduleCloseLimitTimer else { return nil }
+
+        return "Time left: \(formatDuration(TimeInterval(closedLimitRemainingSeconds)))"
     }
 
     private var closedSince: Date? {
