@@ -240,16 +240,26 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     private func statusItemImage() -> NSImage? {
-        guard toggleController.shouldUseWarningIcon else {
+        if toggleController.shouldUseWarningIcon {
+            return displayIconImage(color: .systemOrange)
+        }
+
+        if toggleController.isEnabled {
+            return displayIconImage(color: .systemBlue)
+        }
+
+        do {
             let image = NSImage(systemSymbolName: "display", accessibilityDescription: "Restless")
             image?.isTemplate = true
             return image
         }
+    }
 
+    private func displayIconImage(color: NSColor) -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18))
         image.lockFocus()
 
-        NSColor.systemOrange.setStroke()
+        color.setStroke()
 
         let screenPath = NSBezierPath(roundedRect: NSRect(x: 2.5, y: 6.0, width: 13.0, height: 8.5), xRadius: 1.4, yRadius: 1.4)
         screenPath.lineWidth = 1.9
@@ -628,8 +638,8 @@ private final class HeaderMenuItemView: NSView {
         detailLabel.frame = NSRect(x: 18, y: 12, width: 188, height: 16)
         addSubview(detailLabel)
 
-        let toggle = NSSwitch(frame: NSRect(x: 224, y: 16, width: 52, height: 32))
-        toggle.state = isEnabled ? .on : .off
+        let toggle = MenuSwitchControl(frame: NSRect(x: 224, y: 16, width: 52, height: 32))
+        toggle.isOn = isEnabled
         toggle.target = target
         toggle.action = action
         addSubview(toggle)
@@ -738,8 +748,8 @@ private final class ToggleRowView: NSView {
         subtitleLabel.frame = NSRect(x: 64, y: 8, width: 148, height: 15)
         addSubview(subtitleLabel)
 
-        let toggle = NSSwitch(frame: NSRect(x: 224, y: 9, width: 52, height: 32))
-        toggle.state = isEnabled ? .on : .off
+        let toggle = MenuSwitchControl(frame: NSRect(x: 224, y: 9, width: 52, height: 32))
+        toggle.isOn = isEnabled
         toggle.target = target
         toggle.action = action
         addSubview(toggle)
@@ -747,6 +757,42 @@ private final class ToggleRowView: NSView {
 
     required init?(coder: NSCoder) {
         nil
+    }
+}
+
+private final class MenuSwitchControl: NSControl {
+    var isOn = false {
+        didSet {
+            needsDisplay = true
+        }
+    }
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let trackRect = bounds.insetBy(dx: 2, dy: 4)
+        let trackPath = NSBezierPath(roundedRect: trackRect, xRadius: trackRect.height / 2, yRadius: trackRect.height / 2)
+
+        (isOn ? NSColor.systemBlue : NSColor.controlColor).setFill()
+        trackPath.fill()
+
+        let borderColor = isOn ? NSColor.systemBlue : NSColor.separatorColor
+        borderColor.setStroke()
+        trackPath.lineWidth = 0.5
+        trackPath.stroke()
+
+        let knobDiameter = trackRect.height - 4
+        let knobX = isOn ? trackRect.maxX - knobDiameter - 2 : trackRect.minX + 2
+        let knobRect = NSRect(x: knobX, y: trackRect.minY + 2, width: knobDiameter, height: knobDiameter)
+        NSColor.white.setFill()
+        NSBezierPath(ovalIn: knobRect).fill()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        isOn.toggle()
+        _ = target?.perform(action, with: self)
     }
 }
 
