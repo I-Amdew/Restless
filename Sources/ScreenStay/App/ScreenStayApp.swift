@@ -335,6 +335,8 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         menu.addItem(sectionHeaderItem("Limits"))
         menu.addItem(timeLimitMenu())
         menu.addItem(batteryLimitMenu())
+        menu.addItem(.separator())
+        menu.addItem(sectionHeaderItem("Startup"))
         menu.addItem(launchAtLoginMenuItem())
 
         if !toggleController.isPasswordlessSetupInstalled {
@@ -486,6 +488,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         let item = NSMenuItem()
         item.view = CheckmarkMenuItemView(
             title: "Start at Login",
+            symbolName: "arrow.clockwise",
             isChecked: launchAtLoginController.isEnabled,
             target: self,
             action: #selector(toggleLaunchAtLogin(_:))
@@ -845,33 +848,60 @@ private final class StatusRowView: NSView {
 }
 
 private final class CheckmarkMenuItemView: NSControl {
+    private let iconView = NSImageView()
+    private let boxView = NSView()
     private let checkmarkView = NSImageView()
 
     var isChecked: Bool {
         didSet {
-            checkmarkView.isHidden = !isChecked
+            updateCheckmark()
         }
     }
 
-    init(title: String, isChecked: Bool, target: AnyObject, action: Selector) {
+    init(title: String, symbolName: String, isChecked: Bool, target: AnyObject, action: Selector) {
         self.isChecked = isChecked
         super.init(frame: NSRect(x: 0, y: 0, width: 292, height: 32))
 
         self.target = target
         self.action = action
 
-        checkmarkView.frame = NSRect(x: 20, y: 7, width: 18, height: 18)
-        checkmarkView.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: title)
-        checkmarkView.contentTintColor = .labelColor
-        checkmarkView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
-        checkmarkView.isHidden = !isChecked
-        addSubview(checkmarkView)
+        iconView.frame = NSRect(x: 20, y: 7, width: 18, height: 18)
+        iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
+        iconView.contentTintColor = .labelColor
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        addSubview(iconView)
 
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 14, weight: .medium)
         titleLabel.textColor = .labelColor
-        titleLabel.frame = NSRect(x: 44, y: 7, width: 230, height: 18)
+        titleLabel.frame = NSRect(x: 52, y: 7, width: 184, height: 18)
         addSubview(titleLabel)
+
+        boxView.frame = NSRect(x: 254, y: 7, width: 18, height: 18)
+        boxView.wantsLayer = true
+        boxView.layer?.cornerRadius = 5
+        boxView.layer?.borderWidth = 1.3
+        addSubview(boxView)
+
+        checkmarkView.frame = NSRect(x: 257, y: 10, width: 12, height: 12)
+        checkmarkView.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: title)
+        checkmarkView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+        addSubview(checkmarkView)
+
+        updateCheckmark()
+    }
+
+    private func updateCheckmark() {
+        if isChecked {
+            boxView.layer?.backgroundColor = NSColor.systemBlue.cgColor
+            boxView.layer?.borderColor = NSColor.systemBlue.cgColor
+            checkmarkView.contentTintColor = .white
+            checkmarkView.isHidden = false
+        } else {
+            boxView.layer?.backgroundColor = NSColor.clear.cgColor
+            boxView.layer?.borderColor = NSColor.tertiaryLabelColor.cgColor
+            checkmarkView.isHidden = !isChecked
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -904,7 +934,7 @@ private final class PasswordlessSetupMenuItemView: NSView {
         titleLabel.frame = NSRect(x: 64, y: 50, width: 210, height: 16)
         addSubview(titleLabel)
 
-        let messageLabel = NSTextField(labelWithString: "Stop asking for your password.")
+        let messageLabel = NSTextField(labelWithString: "Allow passwordless keep-awake toggles.")
         messageLabel.font = .systemFont(ofSize: 11, weight: .regular)
         messageLabel.textColor = .secondaryLabelColor
         messageLabel.frame = NSRect(x: 64, y: 34, width: 210, height: 15)
