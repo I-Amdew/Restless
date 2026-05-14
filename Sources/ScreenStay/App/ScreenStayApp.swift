@@ -44,7 +44,6 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleFromMenu(_ sender: Any) {
-        statusItem?.menu?.cancelTracking()
         setSleepDisabled(!toggleController.isEnabled)
     }
 
@@ -88,7 +87,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         handleSettingsChange()
     }
 
-    @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
+    @objc private func toggleLaunchAtLogin(_ sender: Any) {
         do {
             try launchAtLoginController.setEnabled(!launchAtLoginController.isEnabled)
         } catch {
@@ -97,7 +96,6 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func installPasswordlessFromMenu(_ sender: Any) {
-        statusItem?.menu?.cancelTracking()
         updateStatusItem(isWorking: true)
 
         toggleController.installPasswordlessToggle { [weak self] result in
@@ -414,10 +412,15 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     private func launchAtLoginMenuItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "Start at Login", action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
-        item.target = self
-        item.image = menuImage("arrow.clockwise")
-        item.state = launchAtLoginController.isEnabled ? .on : .off
+        let item = NSMenuItem()
+        item.view = ToggleRowView(
+            symbolName: "arrow.clockwise",
+            title: "Start at Login",
+            subtitle: "Open Restless automatically",
+            isEnabled: launchAtLoginController.isEnabled,
+            target: self,
+            action: #selector(toggleLaunchAtLogin(_:))
+        )
         return item
     }
 
@@ -655,6 +658,55 @@ private final class StatusRowView: NSView {
             trailingLabel.frame = NSRect(x: 210, y: 25, width: 64, height: 18)
             addSubview(trailingLabel)
         }
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+}
+
+private final class ToggleRowView: NSView {
+    init(
+        symbolName: String,
+        title: String,
+        subtitle: String,
+        isEnabled: Bool,
+        target: AnyObject,
+        action: Selector
+    ) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 292, height: 50))
+
+        let iconBackground = NSView(frame: NSRect(x: 18, y: 8, width: 34, height: 34))
+        iconBackground.wantsLayer = true
+        iconBackground.layer?.cornerRadius = 17
+        iconBackground.layer?.backgroundColor = NSColor.tertiaryLabelColor.withAlphaComponent(0.18).cgColor
+        addSubview(iconBackground)
+
+        let icon = NSImageView(frame: NSRect(x: 25, y: 15, width: 20, height: 20))
+        icon.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
+        icon.contentTintColor = .secondaryLabelColor
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        addSubview(icon)
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 14, weight: .medium)
+        titleLabel.textColor = .labelColor
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.frame = NSRect(x: 64, y: 25, width: 148, height: 18)
+        addSubview(titleLabel)
+
+        let subtitleLabel = NSTextField(labelWithString: subtitle)
+        subtitleLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        subtitleLabel.textColor = .secondaryLabelColor
+        subtitleLabel.lineBreakMode = .byTruncatingTail
+        subtitleLabel.frame = NSRect(x: 64, y: 8, width: 148, height: 15)
+        addSubview(subtitleLabel)
+
+        let toggle = NSSwitch(frame: NSRect(x: 224, y: 9, width: 52, height: 32))
+        toggle.state = isEnabled ? .on : .off
+        toggle.target = target
+        toggle.action = action
+        addSubview(toggle)
     }
 
     required init?(coder: NSCoder) {
