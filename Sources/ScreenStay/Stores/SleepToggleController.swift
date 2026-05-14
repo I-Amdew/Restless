@@ -6,6 +6,9 @@ final class SleepToggleController {
     private(set) var batteryPercent: Int?
     private(set) var powerSource = "Unknown"
     private(set) var isLidClosed = false
+    private(set) var isPasswordlessSetupInstalled: Bool = UserDefaults.standard.bool(
+        forKey: "restless.passwordlessSetupInstalled"
+    )
 
     var closedSessionMetricsTitle: String? {
         guard isLidClosed, let closedSince else {
@@ -151,37 +154,28 @@ final class SleepToggleController {
     }
 
     func refresh() {
-        let ioregOutput = runPlainCommand("/usr/sbin/ioreg", arguments: ["-r", "-k", "SleepDisabled", "-d", "1"])
-
-        if ioregOutput.contains(#""SleepDisabled" = Yes"#) {
-            applySleepState(isEnabled: true, isKnown: true)
-            return
-        }
-
-        if ioregOutput.contains(#""SleepDisabled" = No"#) {
-            if isPausedForClosedLidSleep, rememberedEnabled {
+        if let actualSleepDisabled = readActualSleepDisabled() {
+            if !actualSleepDisabled, isPausedForClosedLidSleep, rememberedEnabled {
                 isEnabled = true
                 isStatusKnown = true
                 return
             }
 
-            applySleepState(isEnabled: false, isKnown: true)
-            return
-        }
-
-        let pmsetOutput = runPlainCommand("/usr/bin/pmset", arguments: ["-g", "custom"])
-        if let parsedEnabled = parseDisableSleepState(from: pmsetOutput) {
-            if !parsedEnabled, isPausedForClosedLidSleep, rememberedEnabled {
-                isEnabled = true
-                isStatusKnown = true
-                return
-            }
-
-            applySleepState(isEnabled: parsedEnabled, isKnown: true)
+            applySleepState(isEnabled: actualSleepDisabled, isKnown: true)
             return
         }
 
         applySleepState(isEnabled: rememberedEnabled, isKnown: false)
+    }
+
+    func refreshPasswordlessSetupStatus() {
+        guard !isPasswordlessSetupInstalled, let actualSleepDisabled = readActualSleepDisabled() else {
+            return
+        }
+
+        if case .success = Self.runPasswordlessPMSet(value: actualSleepDisabled ? "1" : "0") {
+            markPasswordlessSetupInstalled()
+        }
     }
 
     func monitor() {
@@ -223,12 +217,25 @@ final class SleepToggleController {
         let appleScript = "do shell script \"\(shellCommand)\" with administrator privileges"
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Self.runPasswordlessPMSet(value: value)
-                .orElse { Self.runAuthorizedAppleScript(appleScript) }
+            let passwordlessResult = Self.runPasswordlessPMSet(value: value)
+            let usedPasswordless: Bool
+            let result: Result<Void, Error>
+
+            switch passwordlessResult {
+            case .success:
+                usedPasswordless = true
+                result = passwordlessResult
+            case .failure:
+                usedPasswordless = false
+                result = Self.runAuthorizedAppleScript(appleScript)
+            }
 
             DispatchQueue.main.async {
                 switch result {
                 case .success:
+                    if usedPasswordless {
+                        self.markPasswordlessSetupInstalled()
+                    }
                     self.isPausedForClosedLidSleep = false
                     self.applySleepState(isEnabled: enabled, isKnown: true)
                     if !enabled {
@@ -250,12 +257,25 @@ final class SleepToggleController {
         let appleScript = "do shell script \"\(shellCommand)\" with administrator privileges"
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Self.runPasswordlessPMSet(value: "0")
-                .orElse { Self.runAuthorizedAppleScript(appleScript) }
+            let passwordlessResult = Self.runPasswordlessPMSet(value: "0")
+            let usedPasswordless: Bool
+            let result: Result<Void, Error>
+
+            switch passwordlessResult {
+            case .success:
+                usedPasswordless = true
+                result = passwordlessResult
+            case .failure:
+                usedPasswordless = false
+                result = Self.runAuthorizedAppleScript(appleScript)
+            }
 
             DispatchQueue.main.async {
                 switch result {
                 case .success:
+                    if usedPasswordless {
+                        self.markPasswordlessSetupInstalled()
+                    }
                     self.finishClosedSessionIfNeeded()
                     self.closedSince = nil
                     self.batteryAtClose = nil
@@ -266,6 +286,40 @@ final class SleepToggleController {
                     completion(.success(()))
                 case .failure(let error):
                     self.refresh()
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    func installPasswordlessToggle(completion: @escaping (Result<Void, Error>) -> Void) {
+        let userName = NSUserName()
+        let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        guard userName.rangeOfCharacter(from: allowedCharacters.inverted) == nil else {
+            completion(.failure(RestlessError.commandFailed("Restless could not install setup for this macOS user name.")))
+            return
+        }
+
+        let rule = "\(userName) ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -a disablesleep 1\n"
+        let encodedRule = Data(rule.utf8).base64EncodedString()
+        let adminCommand = [
+            "/bin/mkdir -p /etc/sudoers.d",
+            "/bin/echo '\(encodedRule)' | /usr/bin/base64 -D > /tmp/restless-pmset-sudoers",
+            "/usr/sbin/visudo -cf /tmp/restless-pmset-sudoers",
+            "/usr/bin/install -m 0440 /tmp/restless-pmset-sudoers /etc/sudoers.d/restless-pmset",
+            "/bin/rm -f /tmp/restless-pmset-sudoers"
+        ].joined(separator: " && ")
+        let appleScript = "do shell script \"\(Self.escapeForAppleScript(adminCommand))\" with administrator privileges"
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Self.runAuthorizedAppleScript(appleScript)
+
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    self.markPasswordlessSetupInstalled()
+                    completion(.success(()))
+                case .failure(let error):
                     completion(.failure(error))
                 }
             }
@@ -284,6 +338,12 @@ final class SleepToggleController {
 
     func markResumingAfterClosedLidSleep() {
         isPausedForClosedLidSleep = false
+    }
+
+    private func markPasswordlessSetupInstalled() {
+        isPasswordlessSetupInstalled = true
+        UserDefaults.standard.set(true, forKey: "restless.passwordlessSetupInstalled")
+        UserDefaults.standard.synchronize()
     }
 
     private func startClosedSession() {
@@ -314,6 +374,21 @@ final class SleepToggleController {
         }
 
         return nil
+    }
+
+    private func readActualSleepDisabled() -> Bool? {
+        let ioregOutput = runPlainCommand("/usr/sbin/ioreg", arguments: ["-r", "-k", "SleepDisabled", "-d", "1"])
+
+        if ioregOutput.contains(#""SleepDisabled" = Yes"#) {
+            return true
+        }
+
+        if ioregOutput.contains(#""SleepDisabled" = No"#) {
+            return false
+        }
+
+        let pmsetOutput = runPlainCommand("/usr/bin/pmset", arguments: ["-g", "custom"])
+        return parseDisableSleepState(from: pmsetOutput)
     }
 
     private func refreshBattery() {
@@ -392,6 +467,12 @@ final class SleepToggleController {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         return .failure(RestlessError.commandFailed(message ?? "Passwordless pmset is not configured."))
+    }
+
+    private static func escapeForAppleScript(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
     private func runPlainCommand(_ executable: String, arguments: [String]) -> String {

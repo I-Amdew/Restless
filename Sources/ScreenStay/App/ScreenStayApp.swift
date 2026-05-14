@@ -3,6 +3,7 @@ import IOKit.ps
 
 final class RestlessApp: NSObject, NSApplicationDelegate {
     private let toggleController = SleepToggleController()
+    private let launchAtLoginController = LaunchAtLoginController()
     private var statusItem: NSStatusItem?
     private var monitorTimer: Timer?
     private var limitTimer: Timer?
@@ -22,6 +23,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         }
 
         toggleController.refresh()
+        toggleController.refreshPasswordlessSetupStatus()
         runMonitoringPass(enforceLimits: false)
         startMonitoring()
         startSystemEventMonitoring()
@@ -85,6 +87,28 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         handleSettingsChange()
     }
 
+    @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
+        do {
+            try launchAtLoginController.setEnabled(!launchAtLoginController.isEnabled)
+        } catch {
+            presentError(error, title: "Restless could not update startup")
+        }
+    }
+
+    @objc private func installPasswordlessFromMenu(_ sender: Any) {
+        statusItem?.menu?.cancelTracking()
+        updateStatusItem(isWorking: true)
+
+        toggleController.installPasswordlessToggle { [weak self] result in
+            guard let self else { return }
+            self.runMonitoringPass(enforceLimits: true)
+
+            if case .failure(let error) = result {
+                self.presentError(error, title: "Restless could not finish setup")
+            }
+        }
+    }
+
     private func setSleepDisabled(_ enabled: Bool) {
         updateStatusItem(isWorking: true)
 
@@ -93,7 +117,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             self.runMonitoringPass(enforceLimits: true)
 
             if case .failure(let error) = result {
-                self.presentError(error)
+                self.presentError(error, title: "Restless could not change sleep")
             }
         }
     }
@@ -110,7 +134,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             case .success:
                 self.toggleController.requestSystemSleep()
             case .failure(let error):
-                self.presentError(error)
+                self.presentError(error, title: "Restless could not change sleep")
             }
 
             self.isAutomaticSleepInProgress = false
@@ -261,6 +285,12 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(timeLimitMenu())
         menu.addItem(batteryLimitMenu())
+        menu.addItem(launchAtLoginMenuItem())
+
+        if !toggleController.isPasswordlessSetupInstalled {
+            menu.addItem(.separator())
+            menu.addItem(passwordlessSetupMenuItem())
+        }
 
         statusItem?.menu = menu
         statusItem?.button?.performClick(nil)
@@ -272,6 +302,22 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         item.view = HeaderMenuItemView(
             title: "Restless",
             detail: toggleController.batteryPercent.map { "\($0)%" }
+        )
+        return item
+    }
+
+    private func launchAtLoginMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Start at Login", action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
+        item.target = self
+        item.state = launchAtLoginController.isEnabled ? .on : .off
+        return item
+    }
+
+    private func passwordlessSetupMenuItem() -> NSMenuItem {
+        let item = NSMenuItem()
+        item.view = PasswordlessSetupMenuItemView(
+            target: self,
+            action: #selector(installPasswordlessFromMenu(_:))
         )
         return item
     }
@@ -395,18 +441,21 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
 
         let trimmed = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let value = Int(trimmed), value >= minimum, value <= maximum else {
-            presentError(RestlessError.commandFailed("Enter a whole number from \(minimum) to \(maximum)."))
+            presentError(
+                RestlessError.commandFailed("Enter a whole number from \(minimum) to \(maximum)."),
+                title: "Restless could not save that value"
+            )
             return nil
         }
 
         return value
     }
 
-    private func presentError(_ error: Error) {
+    private func presentError(_ error: Error, title: String) {
         NSApp.activate(ignoringOtherApps: true)
 
         let alert = NSAlert()
-        alert.messageText = "Restless could not change sleep"
+        alert.messageText = title
         alert.informativeText = error.localizedDescription
         alert.alertStyle = .warning
         alert.runModal()
@@ -431,6 +480,35 @@ private final class HeaderMenuItemView: NSView {
             detailLabel.frame = NSRect(x: 158, y: 8, width: 74, height: 18)
             addSubview(detailLabel)
         }
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+}
+
+private final class PasswordlessSetupMenuItemView: NSView {
+    init(target: AnyObject, action: Selector) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 250, height: 72))
+
+        let titleLabel = NSTextField(labelWithString: "One-time setup")
+        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.frame = NSRect(x: 18, y: 46, width: 214, height: 16)
+        addSubview(titleLabel)
+
+        let messageLabel = NSTextField(labelWithString: "Stop asking for your password.")
+        messageLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        messageLabel.textColor = .secondaryLabelColor
+        messageLabel.frame = NSRect(x: 18, y: 29, width: 214, height: 15)
+        addSubview(messageLabel)
+
+        let button = NSButton(title: "Allow Restless", target: target, action: action)
+        button.bezelStyle = .rounded
+        button.controlSize = .small
+        button.font = .systemFont(ofSize: 11, weight: .semibold)
+        button.frame = NSRect(x: 18, y: 4, width: 112, height: 24)
+        addSubview(button)
     }
 
     required init?(coder: NSCoder) {

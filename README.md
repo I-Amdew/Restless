@@ -14,8 +14,8 @@ It is designed for cases like moving around with a MacBook closed while a downlo
 - Last closed-lid session metrics with time and battery used.
 - Event-based battery, wake, screen-sleep, and screen-wake tracking with a polling fallback.
 - Orange menu bar icon when Restless is enabled but the battery cutoff means it will not keep the Mac awake closed.
-- Launch-at-login script.
-- Optional passwordless setup for the exact `pmset` toggle Restless needs.
+- Launch-at-login setting in the menu.
+- One-time in-app setup so Restless can toggle its exact `pmset` command without asking every time.
 
 ## Download
 
@@ -35,38 +35,28 @@ If macOS still says the app is quarantined, run:
 xattr -dr com.apple.quarantine /Applications/Restless.app
 ```
 
-## Setup
+## First Run
 
-Restless changes a system power setting, so macOS normally asks for an administrator password when you turn it on or off.
+1. Open `Restless.app`.
+2. Click the small display icon in the menu bar.
+3. Click **Allow Restless** in the one-time setup banner.
+4. Enter your Mac administrator password when macOS asks.
 
-To avoid typing your password every time, run the included setup script once:
-
-```bash
-./script/install_passwordless_toggle.sh
-```
-
-That script installs a narrow sudoers rule for your user. It only allows these two commands without a password:
+After that, Restless can turn closed-lid keep-awake on and off without asking for your password each time. The setup only allows these two commands:
 
 ```bash
 /usr/bin/pmset -a disablesleep 0
 /usr/bin/pmset -a disablesleep 1
 ```
 
-It does not grant general passwordless sudo access.
-
-To start Restless automatically when you log in:
-
-```bash
-./script/install_startup.sh
-```
+It does not grant general passwordless sudo access. To start Restless automatically, turn on **Start at Login** in the same menu.
 
 ## How To Use
 
-1. Open `Restless.app`.
-2. Click the display icon in the menu bar.
-3. Choose **Turn On**.
-4. Pick a close timer and battery cutoff if you want limits.
-5. Close the lid.
+1. Click the display icon in the menu bar.
+2. Choose **Turn On**.
+3. Pick a close timer and battery cutoff if you want limits.
+4. Close the lid.
 
 When Restless is on, it keeps the Mac awake while closed. If the close timer or battery cutoff is reached, Restless lets the Mac sleep for that closed-lid session but stays enabled for the next time you close the lid.
 
@@ -78,6 +68,16 @@ The menu shows:
 - Last closed-lid session duration and battery use.
 - Close timer.
 - Battery cutoff.
+- Start at login.
+
+## Advanced Setup
+
+The app handles setup from the menu. The release zip also includes terminal scripts for managed or repeat installs:
+
+```bash
+./script/install_passwordless_toggle.sh
+./script/install_startup.sh
+```
 
 ## Safety Notes
 
