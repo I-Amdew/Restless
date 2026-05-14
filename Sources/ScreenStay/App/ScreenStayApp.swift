@@ -300,10 +300,6 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         menu.addItem(sectionHeaderItem("Status"))
         menu.addItem(statusSummaryItem())
 
-        if let metricsTitle = toggleController.closedSessionMetricsTitle {
-            menu.addItem(sessionMetricsItem(metricsTitle))
-        }
-
         if let remaining = toggleController.closedLimitRemainingText {
             menu.addItem(remainingTimeItem(remaining))
         }
@@ -365,21 +361,8 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             symbolName: "display",
             accentColor: statusAccentColor,
             title: statusTitle,
-            subtitle: statusSubtitle,
+            subtitle: statusDetail,
             trailing: toggleController.batteryPercent.map { "\($0)%" }
-        )
-        return item
-    }
-
-    private func sessionMetricsItem(_ metricsTitle: String) -> NSMenuItem {
-        let metric = splitMenuMetric(metricsTitle)
-        let item = NSMenuItem()
-        item.view = StatusRowView(
-            symbolName: "clock",
-            accentColor: .tertiaryLabelColor,
-            title: metric.title,
-            subtitle: metric.detail,
-            trailing: nil
         )
         return item
     }
@@ -413,7 +396,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         return toggleController.isEnabled ? "Sleep prevented" : "Normal sleep"
     }
 
-    private var statusSubtitle: String {
+    private var statusDetail: String {
         if isPausedByBatteryCutoff {
             return "At/below \(batteryLimitTitle()); keep-awake paused"
         }
@@ -422,7 +405,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             return "Will re-arm when the lid opens"
         }
 
-        return "\(toggleController.powerSource) · Lid \(toggleController.isLidClosed ? "Closed" : "Open")"
+        return toggleController.closedSessionMetricsTitle ?? "No closed session yet"
     }
 
     private var statusAccentColor: NSColor {
