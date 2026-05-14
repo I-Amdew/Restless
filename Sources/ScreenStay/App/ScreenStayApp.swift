@@ -631,8 +631,8 @@ private final class HeaderMenuItemView: NSView {
         detailLabel.frame = NSRect(x: 18, y: 12, width: 188, height: 16)
         addSubview(detailLabel)
 
-        let toggle = NSSwitch(frame: NSRect(x: 224, y: 16, width: 52, height: 32))
-        toggle.state = isEnabled ? .on : .off
+        let toggle = MenuSwitchControl(frame: NSRect(x: 224, y: 16, width: 52, height: 32))
+        toggle.isOn = isEnabled
         toggle.target = target
         toggle.action = action
         addSubview(toggle)
@@ -640,6 +640,48 @@ private final class HeaderMenuItemView: NSView {
 
     required init?(coder: NSCoder) {
         nil
+    }
+}
+
+private final class MenuSwitchControl: NSControl {
+    var isOn = false {
+        didSet {
+            needsDisplay = true
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let trackRect = bounds.insetBy(dx: 2, dy: 4)
+        let trackPath = NSBezierPath(
+            roundedRect: trackRect,
+            xRadius: trackRect.height / 2,
+            yRadius: trackRect.height / 2
+        )
+
+        (isOn ? NSColor.systemBlue : NSColor.controlColor).setFill()
+        trackPath.fill()
+
+        if !isOn {
+            NSColor.separatorColor.setStroke()
+            trackPath.lineWidth = 0.5
+            trackPath.stroke()
+        }
+
+        let knobDiameter = trackRect.height - 4
+        let knobX = isOn ? trackRect.maxX - knobDiameter - 2 : trackRect.minX + 2
+        let knobRect = NSRect(
+            x: knobX,
+            y: trackRect.minY + 2,
+            width: knobDiameter,
+            height: knobDiameter
+        )
+        NSColor.white.setFill()
+        NSBezierPath(ovalIn: knobRect).fill()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        isOn.toggle()
+        sendAction(action, to: target)
     }
 }
 
