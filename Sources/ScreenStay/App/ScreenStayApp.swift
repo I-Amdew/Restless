@@ -1,0 +1,355 @@
+import AppKit
+
+final class RestlessApp: NSObject, NSApplicationDelegate {
+    private let toggleController = SleepToggleController()
+    private var statusItem: NSStatusItem?
+    private var monitorTimer: Timer?
+    private var isAutomaticSleepInProgress = false
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem = item
+
+        if let button = item.button {
+            button.target = self
+            button.action = #selector(statusItemClicked(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+
+        toggleController.refresh()
+        runMonitoringPass(enforceLimits: false)
+        startMonitoring()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        monitorTimer?.invalidate()
+        statusItem = nil
+    }
+
+    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        showMenu()
+    }
+
+    @objc private func toggleFromMenu(_ sender: NSMenuItem) {
+        setSleepDisabled(!toggleController.isEnabled)
+    }
+
+    @objc private func chooseSessionLimit(_ sender: NSMenuItem) {
+        guard let minutes = sender.representedObject as? Int else { return }
+        toggleController.sessionLimitMinutes = minutes
+        handleSettingsChange()
+    }
+
+    @objc private func chooseBatteryFloor(_ sender: NSMenuItem) {
+        guard let percent = sender.representedObject as? Int else { return }
+        toggleController.batteryFloorPercent = percent
+        handleSettingsChange()
+    }
+
+    @objc private func chooseCustomSessionLimit(_ sender: NSMenuItem) {
+        guard let minutes = promptForInteger(
+            title: "Custom Time Limit",
+            message: "Minutes to stay awake after the lid closes:",
+            defaultValue: max(toggleController.sessionLimitMinutes, 30),
+            minimum: 1,
+            maximum: 720,
+            unit: "minutes"
+        ) else { return }
+
+        toggleController.sessionLimitMinutes = minutes
+        handleSettingsChange()
+    }
+
+    @objc private func chooseCustomBatteryFloor(_ sender: NSMenuItem) {
+        guard let percent = promptForInteger(
+            title: "Custom Battery Limit",
+            message: "Battery percent where Restless should turn off:",
+            defaultValue: max(toggleController.batteryFloorPercent, 40),
+            minimum: 1,
+            maximum: 99,
+            unit: "percent"
+        ) else { return }
+
+        toggleController.batteryFloorPercent = percent
+        handleSettingsChange()
+    }
+
+    private func setSleepDisabled(_ enabled: Bool) {
+        updateStatusItem(isWorking: true)
+
+        toggleController.setSleepDisabled(enabled) { [weak self] result in
+            guard let self else { return }
+            self.runMonitoringPass(enforceLimits: true)
+
+            if case .failure(let error) = result {
+                self.presentError(error)
+            }
+        }
+    }
+
+    private func enterClosedLidSleepAfterLimit() {
+        updateStatusItem(isWorking: true)
+
+        toggleController.pauseForClosedLidLimit { [weak self] result in
+            guard let self else { return }
+            self.updateStatusItem()
+
+            switch result {
+            case .success:
+                self.toggleController.requestSystemSleep()
+            case .failure(let error):
+                self.presentError(error)
+            }
+
+            self.isAutomaticSleepInProgress = false
+        }
+    }
+
+    private func startMonitoring() {
+        monitorTimer?.invalidate()
+        monitorTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.runMonitoringPass(enforceLimits: true)
+        }
+    }
+
+    private func handleSettingsChange() {
+        runMonitoringPass(enforceLimits: true)
+    }
+
+    private func runMonitoringPass(enforceLimits: Bool) {
+        toggleController.monitor()
+        updateStatusItem()
+
+        if toggleController.shouldResumeAfterClosedLidSleep {
+            toggleController.markResumingAfterClosedLidSleep()
+            setSleepDisabled(true)
+            return
+        }
+
+        if enforceLimits && toggleController.shouldStopForLimit && !isAutomaticSleepInProgress {
+            isAutomaticSleepInProgress = true
+            enterClosedLidSleepAfterLimit()
+        }
+    }
+
+    private func updateStatusItem(isWorking: Bool = false) {
+        guard let button = statusItem?.button else { return }
+
+        button.image = NSImage(systemSymbolName: "display", accessibilityDescription: "Restless")
+            ?? NSImage(systemSymbolName: "display", accessibilityDescription: "Restless")
+        button.image?.isTemplate = true
+        button.imagePosition = .imageOnly
+        button.title = ""
+        button.contentTintColor = nil
+        button.alphaValue = isWorking || toggleController.isEnabled ? 1.0 : 0.62
+        button.toolTip = toggleController.isStatusKnown
+            ? (toggleController.isEnabled ? "Restless on: sleep disabled" : "Restless off: normal sleep")
+            : "Restless: checking sleep status"
+    }
+
+    private func showMenu() {
+        toggleController.monitor()
+
+        let menu = NSMenu()
+
+        menu.addItem(headerMenuItem())
+
+        if let metricsTitle = toggleController.closedSessionMetricsTitle {
+            menu.addItem(disabledItem(metricsTitle))
+        }
+
+        if let remaining = toggleController.closedLimitRemainingText {
+            menu.addItem(disabledItem(remaining))
+        }
+        menu.addItem(.separator())
+
+        let toggleItem = NSMenuItem(
+            title: toggleController.isEnabled ? "Turn Off" : "Turn On",
+            action: #selector(toggleFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        toggleItem.target = self
+        menu.addItem(toggleItem)
+
+        menu.addItem(.separator())
+        menu.addItem(timeLimitMenu())
+        menu.addItem(batteryLimitMenu())
+
+        statusItem?.menu = menu
+        statusItem?.button?.performClick(nil)
+        statusItem?.menu = nil
+    }
+
+    private func headerMenuItem() -> NSMenuItem {
+        let item = NSMenuItem()
+        item.view = HeaderMenuItemView(
+            title: "Restless",
+            detail: toggleController.batteryPercent.map { "\($0)%" }
+        )
+        return item
+    }
+
+    private func disabledItem(_ title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
+    }
+
+    private func timeLimitMenu() -> NSMenuItem {
+        let item = NSMenuItem(title: "Close Timer: \(timeLimitTitle())", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        for menuItem in sessionLimitItems() {
+            submenu.addItem(menuItem)
+        }
+
+        item.submenu = submenu
+        return item
+    }
+
+    private func batteryLimitMenu() -> NSMenuItem {
+        let item = NSMenuItem(title: "Battery Cutoff: \(batteryLimitTitle())", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        for menuItem in batteryFloorItems() {
+            submenu.addItem(menuItem)
+        }
+
+        item.submenu = submenu
+        return item
+    }
+
+    private func timeLimitTitle() -> String {
+        switch toggleController.sessionLimitMinutes {
+        case 0:
+            return "Off"
+        case 60:
+            return "1 hour"
+        default:
+            return "\(toggleController.sessionLimitMinutes) min"
+        }
+    }
+
+    private func batteryLimitTitle() -> String {
+        toggleController.batteryFloorPercent == 0 ? "Off" : "\(toggleController.batteryFloorPercent)%"
+    }
+
+    private func sessionLimitItems() -> [NSMenuItem] {
+        let submenu = NSMenu()
+
+        for option in [0, 15, 30, 60] {
+            let title: String
+            switch option {
+            case 0:
+                title = "Off"
+            case 60:
+                title = "1 hour"
+            default:
+                title = "\(option) min"
+            }
+
+            let menuItem = NSMenuItem(title: title, action: #selector(chooseSessionLimit(_:)), keyEquivalent: "")
+            menuItem.target = self
+            menuItem.representedObject = option
+            menuItem.state = toggleController.sessionLimitMinutes == option ? .on : .off
+            submenu.addItem(menuItem)
+        }
+
+        let customItem = NSMenuItem(title: "Custom...", action: #selector(chooseCustomSessionLimit(_:)), keyEquivalent: "")
+        customItem.target = self
+        customItem.state = [0, 15, 30, 60].contains(toggleController.sessionLimitMinutes) ? .off : .on
+        submenu.addItem(customItem)
+
+        return submenu.items
+    }
+
+    private func batteryFloorItems() -> [NSMenuItem] {
+        let submenu = NSMenu()
+
+        for option in [0, 20, 40] {
+            let title = option == 0 ? "Off" : "\(option)%"
+            let menuItem = NSMenuItem(title: title, action: #selector(chooseBatteryFloor(_:)), keyEquivalent: "")
+            menuItem.target = self
+            menuItem.representedObject = option
+            menuItem.state = toggleController.batteryFloorPercent == option ? .on : .off
+            submenu.addItem(menuItem)
+        }
+
+        let customItem = NSMenuItem(title: "Custom...", action: #selector(chooseCustomBatteryFloor(_:)), keyEquivalent: "")
+        customItem.target = self
+        customItem.state = [0, 20, 40].contains(toggleController.batteryFloorPercent) ? .off : .on
+        submenu.addItem(customItem)
+
+        return submenu.items
+    }
+
+    private func promptForInteger(
+        title: String,
+        message: String,
+        defaultValue: Int,
+        minimum: Int,
+        maximum: Int,
+        unit: String
+    ) -> Int? {
+        NSApp.activate(ignoringOtherApps: true)
+
+        let field = NSTextField(string: "\(defaultValue)")
+        field.frame = NSRect(x: 0, y: 0, width: 180, height: 24)
+        field.alignment = .right
+
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = "\(message) Enter \(minimum)-\(maximum) \(unit)."
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+
+        field.selectText(nil)
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+
+        let trimmed = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = Int(trimmed), value >= minimum, value <= maximum else {
+            presentError(RestlessError.commandFailed("Enter a whole number from \(minimum) to \(maximum)."))
+            return nil
+        }
+
+        return value
+    }
+
+    private func presentError(_ error: Error) {
+        NSApp.activate(ignoringOtherApps: true)
+
+        let alert = NSAlert()
+        alert.messageText = "Restless could not change sleep"
+        alert.informativeText = error.localizedDescription
+        alert.alertStyle = .warning
+        alert.runModal()
+    }
+}
+
+private final class HeaderMenuItemView: NSView {
+    init(title: String, detail: String?) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 250, height: 34))
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.frame = NSRect(x: 18, y: 8, width: 140, height: 18)
+        addSubview(titleLabel)
+
+        if let detail {
+            let detailLabel = NSTextField(labelWithString: detail)
+            detailLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+            detailLabel.textColor = .secondaryLabelColor
+            detailLabel.alignment = .right
+            detailLabel.frame = NSRect(x: 158, y: 8, width: 74, height: 18)
+            addSubview(detailLabel)
+        }
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+}
