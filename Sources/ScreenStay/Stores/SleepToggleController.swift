@@ -531,14 +531,3 @@ enum RestlessError: LocalizedError {
         }
     }
 }
-
-private extension Result where Failure == Error {
-    func orElse(_ fallback: () -> Result<Success, Error>) -> Result<Success, Error> {
-        switch self {
-        case .success:
-            return self
-        case .failure:
-            return fallback()
-        }
-    }
-}

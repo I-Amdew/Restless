@@ -43,7 +43,8 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         showMenu()
     }
 
-    @objc private func toggleFromMenu(_ sender: NSMenuItem) {
+    @objc private func toggleFromMenu(_ sender: Any) {
+        statusItem?.menu?.cancelTracking()
         setSleepDisabled(!toggleController.isEnabled)
     }
 
@@ -264,31 +265,27 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
 
         menu.addItem(headerMenuItem())
+        menu.addItem(.separator())
+        menu.addItem(sectionHeaderItem("Status"))
+        menu.addItem(statusSummaryItem())
 
         if let metricsTitle = toggleController.closedSessionMetricsTitle {
-            menu.addItem(disabledItem(metricsTitle))
+            menu.addItem(sessionMetricsItem(metricsTitle))
         }
 
         if let remaining = toggleController.closedLimitRemainingText {
-            menu.addItem(disabledItem(remaining))
+            menu.addItem(remainingTimeItem(remaining))
         }
-        menu.addItem(.separator())
-
-        let toggleItem = NSMenuItem(
-            title: toggleController.isEnabled ? "Turn Off" : "Turn On",
-            action: #selector(toggleFromMenu(_:)),
-            keyEquivalent: ""
-        )
-        toggleItem.target = self
-        menu.addItem(toggleItem)
 
         menu.addItem(.separator())
+        menu.addItem(sectionHeaderItem("Limits"))
         menu.addItem(timeLimitMenu())
         menu.addItem(batteryLimitMenu())
         menu.addItem(launchAtLoginMenuItem())
 
         if !toggleController.isPasswordlessSetupInstalled {
             menu.addItem(.separator())
+            menu.addItem(sectionHeaderItem("Setup"))
             menu.addItem(passwordlessSetupMenuItem())
         }
 
@@ -301,14 +298,125 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         let item = NSMenuItem()
         item.view = HeaderMenuItemView(
             title: "Restless",
-            detail: toggleController.batteryPercent.map { "\($0)%" }
+            detail: headerSubtitle,
+            isEnabled: toggleController.isEnabled,
+            target: self,
+            action: #selector(toggleFromMenu(_:))
         )
         return item
+    }
+
+    private var headerSubtitle: String {
+        if !toggleController.isStatusKnown {
+            return "Checking sleep status"
+        }
+
+        if toggleController.isBatteryCutoffReached {
+            return "Battery cutoff reached"
+        }
+
+        if toggleController.isWaitingForNextLidOpen {
+            return "Sleeping until lid opens"
+        }
+
+        return toggleController.isEnabled ? "Closed-lid keep-awake is on" : "Normal sleep"
+    }
+
+    private func sectionHeaderItem(_ title: String) -> NSMenuItem {
+        let item = NSMenuItem()
+        item.view = SectionHeaderView(title: title)
+        return item
+    }
+
+    private func statusSummaryItem() -> NSMenuItem {
+        let item = NSMenuItem()
+        item.view = StatusRowView(
+            symbolName: "display",
+            accentColor: statusAccentColor,
+            title: statusTitle,
+            subtitle: statusSubtitle,
+            trailing: toggleController.batteryPercent.map { "\($0)%" }
+        )
+        return item
+    }
+
+    private func sessionMetricsItem(_ metricsTitle: String) -> NSMenuItem {
+        let metric = splitMenuMetric(metricsTitle)
+        let item = NSMenuItem()
+        item.view = StatusRowView(
+            symbolName: "clock",
+            accentColor: .tertiaryLabelColor,
+            title: metric.title,
+            subtitle: metric.detail,
+            trailing: nil
+        )
+        return item
+    }
+
+    private func remainingTimeItem(_ remaining: String) -> NSMenuItem {
+        let metric = splitMenuMetric(remaining)
+        let item = NSMenuItem()
+        item.view = StatusRowView(
+            symbolName: "timer",
+            accentColor: .tertiaryLabelColor,
+            title: metric.title,
+            subtitle: metric.detail,
+            trailing: nil
+        )
+        return item
+    }
+
+    private var statusTitle: String {
+        guard toggleController.isStatusKnown else {
+            return "Checking status"
+        }
+
+        if toggleController.isBatteryCutoffReached {
+            return "Battery cutoff reached"
+        }
+
+        if toggleController.isWaitingForNextLidOpen {
+            return "Sleeping until lid opens"
+        }
+
+        return toggleController.isEnabled ? "Sleep prevented" : "Normal sleep"
+    }
+
+    private var statusSubtitle: String {
+        if toggleController.isBatteryCutoffReached {
+            return "Will sleep closed at \(batteryLimitTitle()) or below"
+        }
+
+        if toggleController.isWaitingForNextLidOpen {
+            return "Restless stays on for the next close"
+        }
+
+        return "\(toggleController.powerSource) · Lid \(toggleController.isLidClosed ? "Closed" : "Open")"
+    }
+
+    private var statusAccentColor: NSColor {
+        if toggleController.shouldUseWarningIcon {
+            return .systemOrange
+        }
+
+        return toggleController.isEnabled ? .systemBlue : .tertiaryLabelColor
+    }
+
+    private func splitMenuMetric(_ value: String) -> (title: String, detail: String) {
+        guard let separator = value.firstIndex(of: ":") else {
+            return (value, "")
+        }
+
+        let title = String(value[..<separator])
+        let detailStart = value.index(after: separator)
+        let detail = value[detailStart...].trimmingCharacters(in: .whitespacesAndNewlines)
+        return (title, detail)
     }
 
     private func launchAtLoginMenuItem() -> NSMenuItem {
         let item = NSMenuItem(title: "Start at Login", action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
         item.target = self
+        item.image = menuImage("arrow.clockwise")
         item.state = launchAtLoginController.isEnabled ? .on : .off
         return item
     }
@@ -322,14 +430,9 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         return item
     }
 
-    private func disabledItem(_ title: String) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        return item
-    }
-
     private func timeLimitMenu() -> NSMenuItem {
         let item = NSMenuItem(title: "Close Timer: \(timeLimitTitle())", action: nil, keyEquivalent: "")
+        item.image = menuImage("timer")
         let submenu = NSMenu()
         for menuItem in sessionLimitItems() {
             submenu.addItem(menuItem)
@@ -341,6 +444,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
 
     private func batteryLimitMenu() -> NSMenuItem {
         let item = NSMenuItem(title: "Battery Cutoff: \(batteryLimitTitle())", action: nil, keyEquivalent: "")
+        item.image = menuImage("battery.50")
         let submenu = NSMenu()
         for menuItem in batteryFloorItems() {
             submenu.addItem(menuItem)
@@ -392,6 +496,12 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         submenu.addItem(customItem)
 
         return submenu.items
+    }
+
+    private func menuImage(_ symbolName: String) -> NSImage? {
+        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        image?.isTemplate = true
+        return image
     }
 
     private func batteryFloorItems() -> [NSMenuItem] {
@@ -463,22 +573,87 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
 }
 
 private final class HeaderMenuItemView: NSView {
-    init(title: String, detail: String?) {
-        super.init(frame: NSRect(x: 0, y: 0, width: 250, height: 34))
+    init(title: String, detail: String, isEnabled: Bool, target: AnyObject, action: Selector) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 292, height: 58))
 
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 16, weight: .semibold)
         titleLabel.textColor = .labelColor
-        titleLabel.frame = NSRect(x: 18, y: 8, width: 140, height: 18)
+        titleLabel.frame = NSRect(x: 18, y: 30, width: 168, height: 20)
         addSubview(titleLabel)
 
-        if let detail {
-            let detailLabel = NSTextField(labelWithString: detail)
-            detailLabel.font = .systemFont(ofSize: 14, weight: .semibold)
-            detailLabel.textColor = .secondaryLabelColor
-            detailLabel.alignment = .right
-            detailLabel.frame = NSRect(x: 158, y: 8, width: 74, height: 18)
-            addSubview(detailLabel)
+        let detailLabel = NSTextField(labelWithString: detail)
+        detailLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        detailLabel.textColor = .secondaryLabelColor
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.frame = NSRect(x: 18, y: 12, width: 188, height: 16)
+        addSubview(detailLabel)
+
+        let toggle = NSSwitch(frame: NSRect(x: 224, y: 16, width: 52, height: 32))
+        toggle.state = isEnabled ? .on : .off
+        toggle.target = target
+        toggle.action = action
+        addSubview(toggle)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+}
+
+private final class SectionHeaderView: NSView {
+    init(title: String) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 292, height: 22))
+
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 12, weight: .semibold)
+        label.textColor = .secondaryLabelColor
+        label.frame = NSRect(x: 18, y: 2, width: 256, height: 16)
+        addSubview(label)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+}
+
+private final class StatusRowView: NSView {
+    init(symbolName: String, accentColor: NSColor, title: String, subtitle: String, trailing: String?) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 292, height: 50))
+
+        let iconBackground = NSView(frame: NSRect(x: 18, y: 8, width: 34, height: 34))
+        iconBackground.wantsLayer = true
+        iconBackground.layer?.cornerRadius = 17
+        iconBackground.layer?.backgroundColor = accentColor.withAlphaComponent(0.18).cgColor
+        addSubview(iconBackground)
+
+        let icon = NSImageView(frame: NSRect(x: 25, y: 15, width: 20, height: 20))
+        icon.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
+        icon.contentTintColor = accentColor
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        addSubview(icon)
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 14, weight: .medium)
+        titleLabel.textColor = .labelColor
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.frame = NSRect(x: 64, y: 25, width: trailing == nil ? 210 : 152, height: 18)
+        addSubview(titleLabel)
+
+        let subtitleLabel = NSTextField(labelWithString: subtitle)
+        subtitleLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        subtitleLabel.textColor = .secondaryLabelColor
+        subtitleLabel.lineBreakMode = .byTruncatingTail
+        subtitleLabel.frame = NSRect(x: 64, y: 8, width: 210, height: 15)
+        addSubview(subtitleLabel)
+
+        if let trailing {
+            let trailingLabel = NSTextField(labelWithString: trailing)
+            trailingLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+            trailingLabel.textColor = .secondaryLabelColor
+            trailingLabel.alignment = .right
+            trailingLabel.frame = NSRect(x: 210, y: 25, width: 64, height: 18)
+            addSubview(trailingLabel)
         }
     }
 
@@ -489,25 +664,36 @@ private final class HeaderMenuItemView: NSView {
 
 private final class PasswordlessSetupMenuItemView: NSView {
     init(target: AnyObject, action: Selector) {
-        super.init(frame: NSRect(x: 0, y: 0, width: 250, height: 72))
+        super.init(frame: NSRect(x: 0, y: 0, width: 292, height: 78))
+
+        let iconBackground = NSView(frame: NSRect(x: 18, y: 22, width: 34, height: 34))
+        iconBackground.wantsLayer = true
+        iconBackground.layer?.cornerRadius = 17
+        iconBackground.layer?.backgroundColor = NSColor.systemBlue.withAlphaComponent(0.2).cgColor
+        addSubview(iconBackground)
+
+        let icon = NSImageView(frame: NSRect(x: 26, y: 30, width: 18, height: 18))
+        icon.image = NSImage(systemSymbolName: "lock.open", accessibilityDescription: "Allow Restless")
+        icon.contentTintColor = .systemBlue
+        addSubview(icon)
 
         let titleLabel = NSTextField(labelWithString: "One-time setup")
         titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         titleLabel.textColor = .labelColor
-        titleLabel.frame = NSRect(x: 18, y: 46, width: 214, height: 16)
+        titleLabel.frame = NSRect(x: 64, y: 50, width: 210, height: 16)
         addSubview(titleLabel)
 
         let messageLabel = NSTextField(labelWithString: "Stop asking for your password.")
         messageLabel.font = .systemFont(ofSize: 11, weight: .regular)
         messageLabel.textColor = .secondaryLabelColor
-        messageLabel.frame = NSRect(x: 18, y: 29, width: 214, height: 15)
+        messageLabel.frame = NSRect(x: 64, y: 34, width: 210, height: 15)
         addSubview(messageLabel)
 
         let button = NSButton(title: "Allow Restless", target: target, action: action)
         button.bezelStyle = .rounded
         button.controlSize = .small
         button.font = .systemFont(ofSize: 11, weight: .semibold)
-        button.frame = NSRect(x: 18, y: 4, width: 112, height: 24)
+        button.frame = NSRect(x: 64, y: 7, width: 112, height: 24)
         addSubview(button)
     }
 
