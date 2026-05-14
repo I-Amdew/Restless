@@ -60,13 +60,15 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func chooseCustomSessionLimit(_ sender: NSMenuItem) {
-        guard let minutes = promptForInteger(
-            title: "Custom Time Limit",
-            message: "Minutes to stay awake after the lid closes:",
+        guard let minutes = promptForCustomValue(
+            title: "Close Timer",
+            symbolName: "timer",
+            label: "Stay awake after lid closes",
             defaultValue: max(toggleController.sessionLimitMinutes, 30),
             minimum: 1,
             maximum: 720,
-            unit: "minutes"
+            step: 5,
+            unit: "min"
         ) else { return }
 
         toggleController.sessionLimitMinutes = minutes
@@ -74,13 +76,15 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func chooseCustomBatteryFloor(_ sender: NSMenuItem) {
-        guard let percent = promptForInteger(
-            title: "Custom Battery Limit",
-            message: "Battery percent where Restless should turn off:",
+        guard let percent = promptForCustomValue(
+            title: "Battery Cutoff",
+            symbolName: "battery.50",
+            label: "Sleep closed at or below",
             defaultValue: max(toggleController.batteryFloorPercent, 40),
             minimum: 1,
             maximum: 99,
-            unit: "percent"
+            step: 1,
+            unit: "%"
         ) else { return }
 
         toggleController.batteryFloorPercent = percent
@@ -515,7 +519,10 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             submenu.addItem(menuItem)
         }
 
-        let customItem = NSMenuItem(title: "Custom...", action: #selector(chooseCustomSessionLimit(_:)), keyEquivalent: "")
+        let customTitle = [0, 15, 30, 60].contains(toggleController.sessionLimitMinutes)
+            ? "Custom..."
+            : "Custom: \(timeLimitTitle())..."
+        let customItem = NSMenuItem(title: customTitle, action: #selector(chooseCustomSessionLimit(_:)), keyEquivalent: "")
         customItem.target = self
         customItem.state = [0, 15, 30, 60].contains(toggleController.sessionLimitMinutes) ? .off : .on
         submenu.addItem(customItem)
@@ -541,7 +548,10 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             submenu.addItem(menuItem)
         }
 
-        let customItem = NSMenuItem(title: "Custom...", action: #selector(chooseCustomBatteryFloor(_:)), keyEquivalent: "")
+        let customTitle = [0, 20, 40].contains(toggleController.batteryFloorPercent)
+            ? "Custom..."
+            : "Custom: \(batteryLimitTitle())..."
+        let customItem = NSMenuItem(title: customTitle, action: #selector(chooseCustomBatteryFloor(_:)), keyEquivalent: "")
         customItem.target = self
         customItem.state = [0, 20, 40].contains(toggleController.batteryFloorPercent) ? .off : .on
         submenu.addItem(customItem)
@@ -549,33 +559,40 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         return submenu.items
     }
 
-    private func promptForInteger(
+    private func promptForCustomValue(
         title: String,
-        message: String,
+        symbolName: String,
+        label: String,
         defaultValue: Int,
         minimum: Int,
         maximum: Int,
+        step: Int,
         unit: String
     ) -> Int? {
         NSApp.activate(ignoringOtherApps: true)
 
-        let field = NSTextField(string: "\(defaultValue)")
-        field.frame = NSRect(x: 0, y: 0, width: 180, height: 24)
-        field.alignment = .right
+        let accessory = CustomValueAccessoryView(
+            label: label,
+            value: defaultValue,
+            minimum: minimum,
+            maximum: maximum,
+            step: step,
+            unit: unit
+        )
 
         let alert = NSAlert()
         alert.messageText = title
-        alert.informativeText = "\(message) Enter \(minimum)-\(maximum) \(unit)."
-        alert.accessoryView = field
+        alert.informativeText = "Enter a custom value."
+        alert.icon = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
+        alert.accessoryView = accessory
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
 
-        field.selectText(nil)
+        accessory.focus()
 
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
 
-        let trimmed = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let value = Int(trimmed), value >= minimum, value <= maximum else {
+        guard let value = accessory.validatedValue else {
             presentError(
                 RestlessError.commandFailed("Enter a whole number from \(minimum) to \(maximum)."),
                 title: "Restless could not save that value"
@@ -594,6 +611,77 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         alert.informativeText = error.localizedDescription
         alert.alertStyle = .warning
         alert.runModal()
+    }
+}
+
+private final class CustomValueAccessoryView: NSView, NSTextFieldDelegate {
+    private let valueField = NSTextField()
+    private let stepper = NSStepper()
+    private let minimum: Int
+    private let maximum: Int
+
+    var validatedValue: Int? {
+        let value = valueField.integerValue
+        guard value >= minimum, value <= maximum else { return nil }
+        return value
+    }
+
+    init(label: String, value: Int, minimum: Int, maximum: Int, step: Int, unit: String) {
+        self.minimum = minimum
+        self.maximum = maximum
+        super.init(frame: NSRect(x: 0, y: 0, width: 276, height: 78))
+
+        let titleLabel = NSTextField(labelWithString: label)
+        titleLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        titleLabel.textColor = .labelColor
+        titleLabel.frame = NSRect(x: 0, y: 56, width: 276, height: 16)
+        addSubview(titleLabel)
+
+        valueField.frame = NSRect(x: 0, y: 24, width: 86, height: 26)
+        valueField.alignment = .right
+        valueField.font = .monospacedDigitSystemFont(ofSize: 14, weight: .medium)
+        valueField.integerValue = min(max(value, minimum), maximum)
+        valueField.delegate = self
+        addSubview(valueField)
+
+        let unitLabel = NSTextField(labelWithString: unit)
+        unitLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        unitLabel.textColor = .secondaryLabelColor
+        unitLabel.frame = NSRect(x: 94, y: 28, width: 56, height: 18)
+        addSubview(unitLabel)
+
+        stepper.frame = NSRect(x: 238, y: 22, width: 20, height: 28)
+        stepper.minValue = Double(minimum)
+        stepper.maxValue = Double(maximum)
+        stepper.increment = Double(step)
+        stepper.integerValue = valueField.integerValue
+        stepper.target = self
+        stepper.action = #selector(stepperChanged(_:))
+        addSubview(stepper)
+
+        let rangeLabel = NSTextField(labelWithString: "\(minimum)-\(maximum) \(unit)")
+        rangeLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        rangeLabel.textColor = .secondaryLabelColor
+        rangeLabel.frame = NSRect(x: 0, y: 1, width: 276, height: 14)
+        addSubview(rangeLabel)
+    }
+
+    func focus() {
+        window?.makeFirstResponder(valueField)
+        valueField.selectText(nil)
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        let clamped = min(max(valueField.integerValue, minimum), maximum)
+        stepper.integerValue = clamped
+    }
+
+    @objc private func stepperChanged(_ sender: NSStepper) {
+        valueField.integerValue = sender.integerValue
+    }
+
+    required init?(coder: NSCoder) {
+        nil
     }
 }
 

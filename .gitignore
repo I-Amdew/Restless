@@ -3,6 +3,7 @@
 .codex/
 dist/
 DerivedData/
+Resources/*.iconset/
 *.xcuserstate
 *.xcuserdata/
 *.swp
