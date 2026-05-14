@@ -9,6 +9,9 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     private var limitTimer: Timer?
     private var powerSourceRunLoopSource: CFRunLoopSource?
     private var isAutomaticSleepInProgress = false
+    private var pendingEnabledOverride: Bool?
+    private weak var visibleHeaderView: HeaderMenuItemView?
+    private weak var visibleStatusRowView: StatusRowView?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -44,19 +47,23 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleFromMenu(_ sender: Any) {
-        setSleepDisabled(!toggleController.isEnabled)
+        let requestedEnabled = (sender as? MenuSwitchControl)?.isOn ?? !effectiveEnabled
+        setSleepDisabled(requestedEnabled)
+        reopenMenuSoon()
     }
 
     @objc private func chooseSessionLimit(_ sender: NSMenuItem) {
         guard let minutes = sender.representedObject as? Int else { return }
         toggleController.sessionLimitMinutes = minutes
         handleSettingsChange()
+        reopenMenuSoon()
     }
 
     @objc private func chooseBatteryFloor(_ sender: NSMenuItem) {
         guard let percent = sender.representedObject as? Int else { return }
         toggleController.batteryFloorPercent = percent
         handleSettingsChange()
+        reopenMenuSoon()
     }
 
     @objc private func chooseCustomSessionLimit(_ sender: NSMenuItem) {
@@ -95,6 +102,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         do {
             try launchAtLoginController.setEnabled(!launchAtLoginController.isEnabled)
             (sender as? CheckmarkMenuItemView)?.isChecked = launchAtLoginController.isEnabled
+            reopenMenuSoon()
         } catch {
             presentError(error, title: "Restless could not update startup")
         }
@@ -114,10 +122,13 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     private func setSleepDisabled(_ enabled: Bool) {
+        pendingEnabledOverride = enabled
         updateStatusItem(isWorking: true)
+        refreshVisibleMenu()
 
         toggleController.setSleepDisabled(enabled) { [weak self] result in
             guard let self else { return }
+            self.pendingEnabledOverride = nil
             self.runMonitoringPass(enforceLimits: true)
 
             if case .failure(let error) = result {
@@ -206,6 +217,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     private func runMonitoringPass(enforceLimits: Bool) {
         toggleController.monitor()
         updateStatusItem()
+        refreshVisibleMenu()
         scheduleLimitTimer()
 
         if toggleController.shouldResumeAfterClosedLidSleep {
@@ -236,14 +248,14 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     private func updateStatusItem(isWorking: Bool = false) {
         guard let button = statusItem?.button else { return }
 
-        let pillColor = statusPillColor
         statusItem?.length = NSStatusItem.squareLength
 
         button.wantsLayer = true
-        button.layer?.cornerRadius = pillColor == nil ? 0 : NSStatusBar.system.thickness / 2
+        button.layer?.cornerRadius = 0
         button.layer?.masksToBounds = true
-        button.layer?.backgroundColor = pillColor?.cgColor
-        button.image = statusItemImage(tintColor: pillColor == nil ? nil : .white)
+        button.layer?.backgroundColor = nil
+        button.layer?.sublayers = nil
+        button.image = statusItemImage(tintColor: statusIconTintColor)
         button.imagePosition = .imageOnly
         button.title = ""
         button.contentTintColor = nil
@@ -252,30 +264,41 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     private func statusItemImage(tintColor: NSColor?) -> NSImage? {
-        let configuration = NSImage.SymbolConfiguration(pointSize: 17, weight: .medium)
-        let image = NSImage(systemSymbolName: "display", accessibilityDescription: "Restless")?
+        let configuration = NSImage.SymbolConfiguration(pointSize: 16.5, weight: .medium)
+        guard let symbol = NSImage(systemSymbolName: "display", accessibilityDescription: "Restless")?
             .withSymbolConfiguration(configuration)
-
-        guard let tintColor else {
-            image?.isTemplate = true
-            return image
+        else {
+            return nil
         }
 
-        let tintedImage = image?.withSymbolConfiguration(.init(hierarchicalColor: tintColor)) ?? image
-        tintedImage?.isTemplate = false
-        return tintedImage
+        let image = NSImage(size: NSSize(width: 20, height: 20))
+        image.lockFocus()
+
+        let drawRect = NSRect(x: 1, y: 0.25, width: 18, height: 18)
+        let drawnSymbol = tintColor
+            .flatMap { symbol.withSymbolConfiguration(.init(hierarchicalColor: $0)) }
+            ?? symbol
+        drawnSymbol.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1.0)
+
+        image.unlockFocus()
+        image.isTemplate = tintColor == nil
+        return image
     }
 
-    private var statusPillColor: NSColor? {
+    private var statusIconTintColor: NSColor? {
         if toggleController.shouldUseWarningIcon {
             return .systemOrange
         }
 
-        if toggleController.isEnabled {
+        if effectiveEnabled {
             return .systemBlue
         }
 
         return nil
+    }
+
+    private var effectiveEnabled: Bool {
+        pendingEnabledOverride ?? toggleController.isEnabled
     }
 
     private var statusToolTip: String {
@@ -291,7 +314,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             return "Restless paused: closed-lid limit reached. It will re-arm when the lid opens."
         }
 
-        return toggleController.isEnabled ? "Restless on: sleep disabled" : "Restless off: normal sleep"
+        return effectiveEnabled ? "Restless on: sleep disabled" : "Restless off: normal sleep"
     }
 
     private func showMenu() {
@@ -325,15 +348,23 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         statusItem?.menu = nil
     }
 
+    private func reopenMenuSoon() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            self?.showMenu()
+        }
+    }
+
     private func headerMenuItem() -> NSMenuItem {
         let item = NSMenuItem()
-        item.view = HeaderMenuItemView(
+        let view = HeaderMenuItemView(
             title: "Restless",
             detail: headerSubtitle,
-            isEnabled: toggleController.isEnabled,
+            isEnabled: effectiveEnabled,
             target: self,
             action: #selector(toggleFromMenu(_:))
         )
+        visibleHeaderView = view
+        item.view = view
         return item
     }
 
@@ -350,7 +381,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             return "Paused until lid opens"
         }
 
-        return toggleController.isEnabled ? "Closed-lid keep-awake is on" : "Normal sleep"
+        return effectiveEnabled ? "Closed-lid keep-awake is on" : ""
     }
 
     private func sectionHeaderItem(_ title: String) -> NSMenuItem {
@@ -361,13 +392,15 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
 
     private func statusSummaryItem() -> NSMenuItem {
         let item = NSMenuItem()
-        item.view = StatusRowView(
+        let view = StatusRowView(
             symbolName: "display",
             accentColor: statusAccentColor,
             title: statusTitle,
             subtitle: statusDetail,
             trailing: toggleController.batteryPercent.map { "\($0)%" }
         )
+        visibleStatusRowView = view
+        item.view = view
         return item
     }
 
@@ -397,7 +430,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             return "Close limit reached"
         }
 
-        return toggleController.isEnabled ? "Sleep prevented" : "Normal sleep"
+        return effectiveEnabled ? "Sleep prevented" : "Normal sleep"
     }
 
     private var statusDetail: String {
@@ -417,7 +450,17 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             return .systemOrange
         }
 
-        return toggleController.isEnabled ? .systemBlue : .tertiaryLabelColor
+        return effectiveEnabled ? .systemBlue : .tertiaryLabelColor
+    }
+
+    private func refreshVisibleMenu() {
+        visibleHeaderView?.configure(detail: headerSubtitle, isEnabled: effectiveEnabled)
+        visibleStatusRowView?.configure(
+            accentColor: statusAccentColor,
+            title: statusTitle,
+            subtitle: statusDetail,
+            trailing: toggleController.batteryPercent.map { "\($0)%" }
+        )
     }
 
     private var isPausedByBatteryCutoff: Bool {
@@ -686,27 +729,38 @@ private final class CustomValueAccessoryView: NSView, NSTextFieldDelegate {
 }
 
 private final class HeaderMenuItemView: NSView {
-    init(title: String, detail: String, isEnabled: Bool, target: AnyObject, action: Selector) {
-        super.init(frame: NSRect(x: 0, y: 0, width: 292, height: 58))
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+    private let toggle = MenuSwitchControl(frame: NSRect(x: 224, y: 9, width: 52, height: 28))
 
-        let titleLabel = NSTextField(labelWithString: title)
+    init(title: String, detail: String, isEnabled: Bool, target: AnyObject, action: Selector) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 292, height: 48))
+
+        titleLabel.stringValue = title
         titleLabel.font = .systemFont(ofSize: 16, weight: .semibold)
         titleLabel.textColor = .labelColor
-        titleLabel.frame = NSRect(x: 18, y: 30, width: 168, height: 20)
+        titleLabel.frame = NSRect(x: 18, y: 24, width: 168, height: 20)
         addSubview(titleLabel)
 
-        let detailLabel = NSTextField(labelWithString: detail)
         detailLabel.font = .systemFont(ofSize: 12, weight: .regular)
         detailLabel.textColor = .secondaryLabelColor
         detailLabel.lineBreakMode = .byTruncatingTail
-        detailLabel.frame = NSRect(x: 18, y: 12, width: 188, height: 16)
+        detailLabel.frame = NSRect(x: 18, y: 6, width: 188, height: 16)
         addSubview(detailLabel)
 
-        let toggle = MenuSwitchControl(frame: NSRect(x: 224, y: 16, width: 52, height: 32))
-        toggle.isOn = isEnabled
         toggle.target = target
         toggle.action = action
         addSubview(toggle)
+
+        configure(detail: detail, isEnabled: isEnabled)
+    }
+
+    func configure(detail: String, isEnabled: Bool) {
+        let hasDetail = !detail.isEmpty
+        titleLabel.frame = NSRect(x: 18, y: hasDetail ? 24 : 14, width: 168, height: 20)
+        detailLabel.stringValue = detail
+        detailLabel.isHidden = !hasDetail
+        toggle.isOn = isEnabled
     }
 
     required init?(coder: NSCoder) {
@@ -714,45 +768,10 @@ private final class HeaderMenuItemView: NSView {
     }
 }
 
-private final class MenuSwitchControl: NSControl {
-    var isOn = false {
-        didSet {
-            needsDisplay = true
-        }
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let trackRect = bounds.insetBy(dx: 2, dy: 4)
-        let trackPath = NSBezierPath(
-            roundedRect: trackRect,
-            xRadius: trackRect.height / 2,
-            yRadius: trackRect.height / 2
-        )
-
-        (isOn ? NSColor.systemBlue : NSColor.controlColor).setFill()
-        trackPath.fill()
-
-        if !isOn {
-            NSColor.separatorColor.setStroke()
-            trackPath.lineWidth = 0.5
-            trackPath.stroke()
-        }
-
-        let knobDiameter = trackRect.height - 4
-        let knobX = isOn ? trackRect.maxX - knobDiameter - 2 : trackRect.minX + 2
-        let knobRect = NSRect(
-            x: knobX,
-            y: trackRect.minY + 2,
-            width: knobDiameter,
-            height: knobDiameter
-        )
-        NSColor.white.setFill()
-        NSBezierPath(ovalIn: knobRect).fill()
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        isOn.toggle()
-        sendAction(action, to: target)
+private final class MenuSwitchControl: NSSwitch {
+    var isOn: Bool {
+        get { state == .on }
+        set { state = newValue ? .on : .off }
     }
 }
 
@@ -773,43 +792,51 @@ private final class SectionHeaderView: NSView {
 }
 
 private final class StatusRowView: NSView {
+    private let iconBackground = NSView(frame: NSRect(x: 18, y: 8, width: 34, height: 34))
+    private let icon = NSImageView(frame: NSRect(x: 25, y: 15, width: 20, height: 20))
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let subtitleLabel = NSTextField(labelWithString: "")
+    private let trailingLabel = NSTextField(labelWithString: "")
+
     init(symbolName: String, accentColor: NSColor, title: String, subtitle: String, trailing: String?) {
         super.init(frame: NSRect(x: 0, y: 0, width: 292, height: 50))
 
-        let iconBackground = NSView(frame: NSRect(x: 18, y: 8, width: 34, height: 34))
         iconBackground.wantsLayer = true
         iconBackground.layer?.cornerRadius = 17
-        iconBackground.layer?.backgroundColor = accentColor.withAlphaComponent(0.18).cgColor
         addSubview(iconBackground)
 
-        let icon = NSImageView(frame: NSRect(x: 25, y: 15, width: 20, height: 20))
         icon.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
-        icon.contentTintColor = accentColor
         icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
         addSubview(icon)
 
-        let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 14, weight: .medium)
         titleLabel.textColor = .labelColor
         titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.frame = NSRect(x: 64, y: 25, width: trailing == nil ? 210 : 152, height: 18)
         addSubview(titleLabel)
 
-        let subtitleLabel = NSTextField(labelWithString: subtitle)
         subtitleLabel.font = .systemFont(ofSize: 11, weight: .regular)
         subtitleLabel.textColor = .secondaryLabelColor
         subtitleLabel.lineBreakMode = .byTruncatingTail
         subtitleLabel.frame = NSRect(x: 64, y: 8, width: 210, height: 15)
         addSubview(subtitleLabel)
 
-        if let trailing {
-            let trailingLabel = NSTextField(labelWithString: trailing)
-            trailingLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-            trailingLabel.textColor = .secondaryLabelColor
-            trailingLabel.alignment = .right
-            trailingLabel.frame = NSRect(x: 210, y: 25, width: 64, height: 18)
-            addSubview(trailingLabel)
-        }
+        trailingLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        trailingLabel.textColor = .secondaryLabelColor
+        trailingLabel.alignment = .right
+        trailingLabel.frame = NSRect(x: 210, y: 25, width: 64, height: 18)
+        addSubview(trailingLabel)
+
+        configure(accentColor: accentColor, title: title, subtitle: subtitle, trailing: trailing)
+    }
+
+    func configure(accentColor: NSColor, title: String, subtitle: String, trailing: String?) {
+        iconBackground.layer?.backgroundColor = accentColor.withAlphaComponent(0.18).cgColor
+        icon.contentTintColor = accentColor
+        titleLabel.stringValue = title
+        titleLabel.frame = NSRect(x: 64, y: 25, width: trailing == nil ? 210 : 152, height: 18)
+        subtitleLabel.stringValue = subtitle
+        trailingLabel.stringValue = trailing ?? ""
+        trailingLabel.isHidden = trailing == nil
     }
 
     required init?(coder: NSCoder) {
