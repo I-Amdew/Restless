@@ -11,7 +11,11 @@ ZIP_PATH="$DIST_DIR/$APP_NAME.zip"
 DMG_PATH="$DIST_DIR/$APP_NAME.dmg"
 RW_DMG_PATH="$DIST_DIR/$APP_NAME-rw.dmg"
 
-"$ROOT_DIR/script/build_and_run.sh" --verify
+if [[ "${CI:-}" == "true" ]]; then
+  "$ROOT_DIR/script/build_and_run.sh" --build
+else
+  "$ROOT_DIR/script/build_and_run.sh" --verify
+fi
 
 rm -rf "$STAGE_DIR" "$DMG_STAGE_DIR" "$ZIP_PATH" "$DMG_PATH" "$RW_DMG_PATH"
 mkdir -p "$STAGE_DIR/script"
