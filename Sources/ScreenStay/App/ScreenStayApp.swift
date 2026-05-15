@@ -264,17 +264,17 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     private func statusItemImage(tintColor: NSColor?) -> NSImage? {
-        let configuration = NSImage.SymbolConfiguration(pointSize: 16.5, weight: .medium)
+        let configuration = NSImage.SymbolConfiguration(pointSize: 17, weight: .medium)
         guard let symbol = NSImage(systemSymbolName: "display", accessibilityDescription: "Restless")?
             .withSymbolConfiguration(configuration)
         else {
             return nil
         }
 
-        let image = NSImage(size: NSSize(width: 20, height: 20))
+        let image = NSImage(size: NSSize(width: 22, height: 20))
         image.lockFocus()
 
-        let drawRect = NSRect(x: 1, y: 0.25, width: 18, height: 18)
+        let drawRect = NSRect(x: 1, y: 1.15, width: 20, height: 16.75)
         let drawnSymbol = tintColor
             .flatMap { symbol.withSymbolConfiguration(.init(hierarchicalColor: $0)) }
             ?? symbol
@@ -877,13 +877,14 @@ private final class CheckmarkMenuItemView: NSControl {
         titleLabel.frame = NSRect(x: 52, y: 7, width: 184, height: 18)
         addSubview(titleLabel)
 
-        boxView.frame = NSRect(x: 254, y: 7, width: 18, height: 18)
+        boxView.frame = NSRect(x: 252, y: 6, width: 20, height: 20)
         boxView.wantsLayer = true
         boxView.layer?.cornerRadius = 5
         boxView.layer?.borderWidth = 1.3
+        boxView.layer?.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
         addSubview(boxView)
 
-        checkmarkView.frame = NSRect(x: 257, y: 10, width: 12, height: 12)
+        checkmarkView.frame = NSRect(x: 256, y: 10, width: 12, height: 12)
         checkmarkView.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: title)
         checkmarkView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
         addSubview(checkmarkView)
