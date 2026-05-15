@@ -9,6 +9,8 @@ It is designed for cases like moving around with a MacBook closed while a downlo
 - Menu bar only: no Dock icon and no main window.
 - One-click on/off control from a small display icon.
 - Closed-lid keep-awake mode using macOS `pmset`.
+- Prevents idle display sleep/screensaver while keep-awake is active, so long-running apps can keep working.
+- Dims the built-in display brightness on lid close instead of forcing display sleep.
 - Optional close timer, such as 15 minutes, 30 minutes, 1 hour, or custom.
 - Optional battery cutoff, such as 20%, 40%, or custom.
 - Last closed-lid session metrics with time and battery used.
@@ -58,7 +60,7 @@ It does not grant general passwordless sudo access. To start Restless automatica
 3. Pick a close timer and battery cutoff if you want limits.
 4. Close the lid.
 
-When Restless is on, it keeps the Mac awake while closed. If the close timer or battery cutoff is reached, Restless lets the Mac sleep for that closed-lid session but stays enabled for the next time you close the lid.
+When Restless is on, it keeps the Mac awake while closed. It also holds macOS activity assertions so the idle screensaver/display-sleep path does not interrupt long-running apps. When the lid closes, Restless dims the display brightness instead of calling display sleep. If the close timer or battery cutoff is reached, Restless lets the Mac sleep for that closed-lid session but stays enabled for the next time you close the lid.
 
 Restless watches macOS power-source and wake events, so the menu updates when the battery changes, when the close timer expires, and when the lid opens again. The close timer resets every time a new closed-lid session starts. If the battery is already at or below your cutoff, the menu bar icon turns orange to show that closed-lid keep-awake will pause until the battery is above the limit or the cutoff is changed.
 

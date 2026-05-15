@@ -1,4 +1,7 @@
+import CoreGraphics
+import Darwin
 import Foundation
+import IOKit.pwr_mgt
 
 final class SleepToggleController {
     private(set) var isEnabled = false
@@ -9,6 +12,9 @@ final class SleepToggleController {
     private(set) var isPasswordlessSetupInstalled: Bool = UserDefaults.standard.bool(
         forKey: "restless.passwordlessSetupInstalled"
     )
+    private let brightnessController = DisplayBrightnessController()
+    private var systemSleepAssertionID = IOPMAssertionID(0)
+    private var displaySleepAssertionID = IOPMAssertionID(0)
 
     var closedSessionMetricsTitle: String? {
         guard isLidClosed, let closedSince else {
@@ -153,6 +159,11 @@ final class SleepToggleController {
         batteryAtClose = storedBatteryAtClose
     }
 
+    deinit {
+        releaseActivityAssertions()
+        brightnessController.restoreIfNeeded()
+    }
+
     func refresh() {
         if let actualSleepDisabled = readActualSleepDisabled() {
             if !actualSleepDisabled, isPausedForClosedLidSleep, rememberedEnabled {
@@ -184,12 +195,16 @@ final class SleepToggleController {
 
         let wasClosed = isLidClosed
         isLidClosed = readLidClosed()
+        updateActivityAssertions()
 
         if isPausedForClosedLidSleep {
+            brightnessController.restoreIfNeeded()
             return
         }
 
         guard isEnabled else {
+            releaseActivityAssertions()
+            brightnessController.restoreIfNeeded()
             finishClosedSessionIfNeeded()
             closedSince = nil
             batteryAtClose = nil
@@ -202,9 +217,10 @@ final class SleepToggleController {
             }
 
             if !wasClosed {
-                forceDisplaySleep()
+                brightnessController.dim()
             }
         } else {
+            brightnessController.restoreIfNeeded()
             finishClosedSessionIfNeeded()
             closedSince = nil
             batteryAtClose = nil
@@ -239,9 +255,16 @@ final class SleepToggleController {
                     self.isPausedForClosedLidSleep = false
                     self.applySleepState(isEnabled: enabled, isKnown: true)
                     if !enabled {
+                        self.releaseActivityAssertions()
+                        self.brightnessController.restoreIfNeeded()
                         self.finishClosedSessionIfNeeded()
                         self.closedSince = nil
                         self.batteryAtClose = nil
+                    } else {
+                        self.updateActivityAssertions()
+                        if self.isLidClosed {
+                            self.brightnessController.dim()
+                        }
                     }
                     completion(.success(()))
                 case .failure(let error):
@@ -280,6 +303,8 @@ final class SleepToggleController {
                     self.closedSince = nil
                     self.batteryAtClose = nil
                     self.isPausedForClosedLidSleep = true
+                    self.releaseActivityAssertions()
+                    self.brightnessController.restoreIfNeeded()
                     self.isEnabled = true
                     self.isStatusKnown = true
                     self.rememberedEnabled = true
@@ -338,6 +363,7 @@ final class SleepToggleController {
 
     func markResumingAfterClosedLidSleep() {
         isPausedForClosedLidSleep = false
+        updateActivityAssertions()
     }
 
     private func markPasswordlessSetupInstalled() {
@@ -357,6 +383,54 @@ final class SleepToggleController {
         isStatusKnown = isKnown
         isPausedForClosedLidSleep = false
         rememberedEnabled = isEnabled
+    }
+
+    private func updateActivityAssertions() {
+        if isEnabled && !isPausedForClosedLidSleep {
+            createActivityAssertionsIfNeeded()
+        } else {
+            releaseActivityAssertions()
+        }
+    }
+
+    private func createActivityAssertionsIfNeeded() {
+        if systemSleepAssertionID == 0 {
+            var assertionID = IOPMAssertionID(0)
+            let result = IOPMAssertionCreateWithName(
+                kIOPMAssertPreventUserIdleSystemSleep as CFString,
+                IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                "Restless is keeping closed-lid work active" as CFString,
+                &assertionID
+            )
+            if result == kIOReturnSuccess {
+                systemSleepAssertionID = assertionID
+            }
+        }
+
+        if displaySleepAssertionID == 0 {
+            var assertionID = IOPMAssertionID(0)
+            let result = IOPMAssertionCreateWithName(
+                kIOPMAssertPreventUserIdleDisplaySleep as CFString,
+                IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                "Restless is preventing idle display sleep and screensaver" as CFString,
+                &assertionID
+            )
+            if result == kIOReturnSuccess {
+                displaySleepAssertionID = assertionID
+            }
+        }
+    }
+
+    private func releaseActivityAssertions() {
+        if systemSleepAssertionID != 0 {
+            IOPMAssertionRelease(systemSleepAssertionID)
+            systemSleepAssertionID = 0
+        }
+
+        if displaySleepAssertionID != 0 {
+            IOPMAssertionRelease(displaySleepAssertionID)
+            displaySleepAssertionID = 0
+        }
     }
 
     private func parseDisableSleepState(from output: String) -> Bool? {
@@ -413,10 +487,6 @@ final class SleepToggleController {
     private func readLidClosed() -> Bool {
         let output = runPlainCommand("/usr/sbin/ioreg", arguments: ["-r", "-k", "AppleClamshellState", "-d", "4"])
         return output.contains(#""AppleClamshellState" = Yes"#)
-    }
-
-    private func forceDisplaySleep() {
-        _ = runPlainCommand("/usr/bin/pmset", arguments: ["displaysleepnow"])
     }
 
     private func finishClosedSessionIfNeeded() {
@@ -518,6 +588,62 @@ final class SleepToggleController {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         return .failure(RestlessError.commandFailed(message ?? "The admin command was cancelled or failed."))
+    }
+}
+
+private final class DisplayBrightnessController {
+    private typealias GetBrightness = @convention(c) (CGDirectDisplayID, UnsafeMutablePointer<Float>) -> Int32
+    private typealias SetBrightness = @convention(c) (CGDirectDisplayID, Float) -> Int32
+
+    private let handle: UnsafeMutableRawPointer?
+    private let getBrightness: GetBrightness?
+    private let setBrightness: SetBrightness?
+    private var savedBrightness: Float?
+
+    init() {
+        handle = dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_LAZY)
+
+        if let handle, let symbol = dlsym(handle, "DisplayServicesGetBrightness") {
+            getBrightness = unsafeBitCast(symbol, to: GetBrightness.self)
+        } else {
+            getBrightness = nil
+        }
+
+        if let handle, let symbol = dlsym(handle, "DisplayServicesSetBrightness") {
+            setBrightness = unsafeBitCast(symbol, to: SetBrightness.self)
+        } else {
+            setBrightness = nil
+        }
+    }
+
+    deinit {
+        restoreIfNeeded()
+        if let handle {
+            dlclose(handle)
+        }
+    }
+
+    func dim() {
+        guard savedBrightness == nil, let currentBrightness, let setBrightness else { return }
+        guard currentBrightness > 0.01 else { return }
+
+        if setBrightness(CGMainDisplayID(), 0) == 0 {
+            savedBrightness = currentBrightness
+        }
+    }
+
+    func restoreIfNeeded() {
+        guard let savedBrightness, let setBrightness else { return }
+        _ = setBrightness(CGMainDisplayID(), max(0.05, savedBrightness))
+        self.savedBrightness = nil
+    }
+
+    private var currentBrightness: Float? {
+        guard let getBrightness else { return nil }
+
+        var brightness: Float = 0
+        guard getBrightness(CGMainDisplayID(), &brightness) == 0 else { return nil }
+        return brightness
     }
 }
 
