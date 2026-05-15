@@ -15,6 +15,7 @@ final class SleepToggleController {
     )
     private let brightnessController = DisplayBrightnessController()
     private var systemSleepAssertionID = IOPMAssertionID(0)
+    private var clamshellSleepAssertionID = IOPMAssertionID(0)
     private var displaySleepAssertionID = IOPMAssertionID(0)
 
     var closedSessionMetricsTitle: String? {
@@ -418,6 +419,19 @@ final class SleepToggleController {
             }
         }
 
+        if clamshellSleepAssertionID == 0 {
+            var assertionID = IOPMAssertionID(0)
+            let result = IOPMAssertionCreateWithName(
+                "PreventSystemSleep" as CFString,
+                IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                "Restless is preventing lid-close system sleep" as CFString,
+                &assertionID
+            )
+            if result == kIOReturnSuccess {
+                clamshellSleepAssertionID = assertionID
+            }
+        }
+
         if displaySleepAssertionID == 0 {
             var assertionID = IOPMAssertionID(0)
             let result = IOPMAssertionCreateWithName(
@@ -436,6 +450,11 @@ final class SleepToggleController {
         if systemSleepAssertionID != 0 {
             IOPMAssertionRelease(systemSleepAssertionID)
             systemSleepAssertionID = 0
+        }
+
+        if clamshellSleepAssertionID != 0 {
+            IOPMAssertionRelease(clamshellSleepAssertionID)
+            clamshellSleepAssertionID = 0
         }
 
         if displaySleepAssertionID != 0 {

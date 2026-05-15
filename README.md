@@ -21,9 +21,13 @@ It is designed for cases like moving around with a MacBook closed while a downlo
 
 ## Download
 
-Download [`Restless.dmg`](dist/Restless.dmg), open it, and drag `Restless.app` onto the Applications shortcut.
+Download the latest DMG from GitHub:
 
-The zip is still available at [`Restless.zip`](dist/Restless.zip) for people who need a plain archive, but the DMG is the normal install flow.
+[`Restless.dmg`](https://github.com/I-Amdew/Restless/raw/main/dist/Restless.dmg)
+
+Open it, then drag `Restless.app` onto the Applications shortcut.
+
+The zip is still available at [`Restless.zip`](https://github.com/I-Amdew/Restless/raw/main/dist/Restless.zip) for people who need a plain archive, but the DMG is the normal install flow.
 
 The app is not notarized yet. If macOS blocks it the first time:
 
@@ -64,7 +68,7 @@ It does not grant general passwordless sudo access. If you skip setup, Restless 
 3. Pick a close timer and battery cutoff if you want limits.
 4. Close the lid.
 
-When Restless is on, it keeps the Mac awake while closed. It also holds macOS activity assertions so the idle screensaver/display-sleep path does not interrupt long-running apps. When the lid closes, Restless dims the display brightness instead of calling display sleep. If the close timer or battery cutoff is reached, Restless lets the Mac sleep for that closed-lid session but stays enabled for the next time you close the lid.
+When Restless is on, it keeps the Mac awake while closed. It holds macOS system-sleep and idle activity assertions so the lid-close, screensaver, and display-sleep paths do not interrupt long-running apps. When the lid closes, Restless dims the display brightness instead of calling display sleep. If the close timer or battery cutoff is reached, Restless lets the Mac sleep for that closed-lid session but stays enabled for the next time you close the lid.
 
 Restless watches macOS power-source and wake events, so the menu updates when the battery changes, when the close timer expires, and when the lid opens again. The close timer resets every time a new closed-lid session starts. If the battery is already at or below your cutoff, the menu bar icon turns orange to show that closed-lid keep-awake will pause until the battery is above the limit or the cutoff is changed.
 
@@ -89,7 +93,7 @@ The app handles setup from the menu. The release zip also includes terminal scri
 
 Keeping a laptop awake while closed can generate heat, especially if it is in a bag or under load. Use a conservative timer and battery cutoff, and avoid keeping the Mac running closed in a confined space.
 
-Restless does not bypass macOS security. It uses the built-in `/usr/bin/pmset` tool and only changes the `disablesleep` setting.
+Restless does not bypass macOS security. It uses the built-in `/usr/bin/pmset` tool for the `disablesleep` setting and macOS power assertions while keep-awake is active.
 
 ## Build From Source
 
