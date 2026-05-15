@@ -9,6 +9,7 @@ final class SleepToggleController {
     private(set) var batteryPercent: Int?
     private(set) var powerSource = "Unknown"
     private(set) var isLidClosed = false
+    private(set) var isActualSleepDisabled = false
     private(set) var isPasswordlessSetupInstalled: Bool = UserDefaults.standard.bool(
         forKey: "restless.passwordlessSetupInstalled"
     )
@@ -84,6 +85,10 @@ final class SleepToggleController {
 
     var shouldScheduleCloseLimitTimer: Bool {
         isEnabled && !isPausedForClosedLidSleep && isLidClosed && sessionLimitMinutes > 0 && closedSince != nil
+    }
+
+    var shouldReapplyDesiredKeepAwake: Bool {
+        rememberedEnabled && !isPausedForClosedLidSleep && isStatusKnown && !isActualSleepDisabled
     }
 
     var closedLimitRemainingSeconds: Int {
@@ -166,17 +171,21 @@ final class SleepToggleController {
 
     func refresh() {
         if let actualSleepDisabled = readActualSleepDisabled() {
-            if !actualSleepDisabled, isPausedForClosedLidSleep, rememberedEnabled {
-                isEnabled = true
-                isStatusKnown = true
+            isActualSleepDisabled = actualSleepDisabled
+            isStatusKnown = true
+
+            if actualSleepDisabled {
+                applySleepState(isEnabled: true, isKnown: true)
                 return
             }
 
-            applySleepState(isEnabled: actualSleepDisabled, isKnown: true)
+            isEnabled = rememberedEnabled
             return
         }
 
-        applySleepState(isEnabled: rememberedEnabled, isKnown: false)
+        isActualSleepDisabled = false
+        isEnabled = rememberedEnabled
+        isStatusKnown = false
     }
 
     func refreshPasswordlessSetupStatus() {
@@ -306,6 +315,7 @@ final class SleepToggleController {
                     self.releaseActivityAssertions()
                     self.brightnessController.restoreIfNeeded()
                     self.isEnabled = true
+                    self.isActualSleepDisabled = false
                     self.isStatusKnown = true
                     self.rememberedEnabled = true
                     completion(.success(()))
@@ -380,6 +390,7 @@ final class SleepToggleController {
 
     private func applySleepState(isEnabled: Bool, isKnown: Bool) {
         self.isEnabled = isEnabled
+        isActualSleepDisabled = isEnabled
         isStatusKnown = isKnown
         isPausedForClosedLidSleep = false
         rememberedEnabled = isEnabled

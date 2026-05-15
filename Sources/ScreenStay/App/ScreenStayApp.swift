@@ -226,6 +226,13 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             return
         }
 
+        if requestedSleepDisabled == nil,
+           !isSleepToggleCommandRunning,
+           toggleController.shouldReapplyDesiredKeepAwake {
+            setSleepDisabled(true)
+            return
+        }
+
         if enforceLimits && toggleController.shouldStopForLimit && !isAutomaticSleepInProgress {
             isAutomaticSleepInProgress = true
             enterClosedLidSleepAfterLimit()
