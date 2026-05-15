@@ -336,7 +336,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         menu.addItem(timeLimitMenu())
         menu.addItem(batteryLimitMenu())
         menu.addItem(.separator())
-        menu.addItem(sectionHeaderItem("Startup"))
+        menu.addItem(sectionHeaderItem("Settings"))
         menu.addItem(launchAtLoginMenuItem())
 
         if !toggleController.isPasswordlessSetupInstalled {
@@ -733,23 +733,16 @@ private final class CustomValueAccessoryView: NSView, NSTextFieldDelegate {
 
 private final class HeaderMenuItemView: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
-    private let detailLabel = NSTextField(labelWithString: "")
-    private let toggle = MenuSwitchControl(frame: NSRect(x: 224, y: 9, width: 52, height: 28))
+    private let toggle = MenuSwitchControl(frame: NSRect(x: 224, y: 6, width: 52, height: 28))
 
     init(title: String, detail: String, isEnabled: Bool, target: AnyObject, action: Selector) {
-        super.init(frame: NSRect(x: 0, y: 0, width: 292, height: 48))
+        super.init(frame: NSRect(x: 0, y: 0, width: 292, height: 40))
 
         titleLabel.stringValue = title
-        titleLabel.font = .systemFont(ofSize: 16, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
         titleLabel.textColor = .labelColor
-        titleLabel.frame = NSRect(x: 18, y: 24, width: 168, height: 20)
+        titleLabel.frame = NSRect(x: 18, y: 9, width: 168, height: 22)
         addSubview(titleLabel)
-
-        detailLabel.font = .systemFont(ofSize: 12, weight: .regular)
-        detailLabel.textColor = .secondaryLabelColor
-        detailLabel.lineBreakMode = .byTruncatingTail
-        detailLabel.frame = NSRect(x: 18, y: 6, width: 188, height: 16)
-        addSubview(detailLabel)
 
         toggle.target = target
         toggle.action = action
@@ -759,10 +752,6 @@ private final class HeaderMenuItemView: NSView {
     }
 
     func configure(detail: String, isEnabled: Bool) {
-        let hasDetail = !detail.isEmpty
-        titleLabel.frame = NSRect(x: 18, y: hasDetail ? 24 : 14, width: 168, height: 20)
-        detailLabel.stringValue = detail
-        detailLabel.isHidden = !hasDetail
         toggle.isOn = isEnabled
     }
 
