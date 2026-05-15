@@ -67,32 +67,14 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func chooseCustomSessionLimit(_ sender: NSMenuItem) {
-        guard let minutes = promptForCustomValue(
-            title: "Close Timer",
-            symbolName: "timer",
-            label: "Stay awake after lid closes",
-            defaultValue: max(toggleController.sessionLimitMinutes, 30),
-            minimum: 1,
-            maximum: 720,
-            step: 5,
-            unit: "min"
-        ) else { return }
+        guard let minutes = promptForCustomSessionLimit() else { return }
 
         toggleController.sessionLimitMinutes = minutes
         handleSettingsChange()
     }
 
     @objc private func chooseCustomBatteryFloor(_ sender: NSMenuItem) {
-        guard let percent = promptForCustomValue(
-            title: "Battery Cutoff",
-            symbolName: "battery.50",
-            label: "Sleep closed at or below",
-            defaultValue: max(toggleController.batteryFloorPercent, 40),
-            minimum: 1,
-            maximum: 99,
-            step: 1,
-            unit: "%"
-        ) else { return }
+        guard let percent = promptForCustomBatteryFloor() else { return }
 
         toggleController.batteryFloorPercent = percent
         handleSettingsChange()
@@ -100,8 +82,9 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
 
     @objc private func toggleLaunchAtLogin(_ sender: Any) {
         do {
-            try launchAtLoginController.setEnabled(!launchAtLoginController.isEnabled)
-            (sender as? CheckmarkMenuItemView)?.isChecked = launchAtLoginController.isEnabled
+            let requestedEnabled = (sender as? ToggleMenuItemView)?.isOn ?? !launchAtLoginController.isEnabled
+            try launchAtLoginController.setEnabled(requestedEnabled)
+            (sender as? ToggleMenuItemView)?.isOn = launchAtLoginController.isEnabled
             reopenMenuSoon()
         } catch {
             presentError(error, title: "Restless could not update startup")
@@ -371,19 +354,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     private var headerSubtitle: String {
-        if !toggleController.isStatusKnown {
-            return "Checking sleep status"
-        }
-
-        if isPausedByBatteryCutoff {
-            return "Paused: battery below \(batteryLimitTitle())"
-        }
-
-        if isPausedAfterClosedLidLimit {
-            return "Paused until lid opens"
-        }
-
-        return effectiveEnabled ? "Closed-lid keep-awake is on" : ""
+        ""
     }
 
     private func sectionHeaderItem(_ title: String) -> NSMenuItem {
@@ -432,7 +403,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             return "Close limit reached"
         }
 
-        return effectiveEnabled ? "Sleep prevented" : "Normal sleep"
+        return effectiveEnabled ? "Preventing sleep" : "Normal sleep"
     }
 
     private var statusDetail: String {
@@ -486,10 +457,10 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
 
     private func launchAtLoginMenuItem() -> NSMenuItem {
         let item = NSMenuItem()
-        item.view = CheckmarkMenuItemView(
+        item.view = ToggleMenuItemView(
             title: "Start at Login",
             symbolName: "arrow.clockwise",
-            isChecked: launchAtLoginController.isEnabled,
+            isOn: launchAtLoginController.isEnabled,
             target: self,
             action: #selector(toggleLaunchAtLogin(_:))
         )
@@ -535,6 +506,8 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             return "Off"
         case 60:
             return "1 hour"
+        case 120:
+            return "2 hours"
         default:
             return "\(toggleController.sessionLimitMinutes) min"
         }
@@ -546,14 +519,17 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
 
     private func sessionLimitItems() -> [NSMenuItem] {
         let submenu = NSMenu()
+        let presets = [0, 15, 30, 60, 120]
 
-        for option in [0, 15, 30, 60] {
+        for option in presets {
             let title: String
             switch option {
             case 0:
                 title = "Off"
             case 60:
                 title = "1 hour"
+            case 120:
+                title = "2 hours"
             default:
                 title = "\(option) min"
             }
@@ -565,12 +541,12 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             submenu.addItem(menuItem)
         }
 
-        let customTitle = [0, 15, 30, 60].contains(toggleController.sessionLimitMinutes)
+        let customTitle = presets.contains(toggleController.sessionLimitMinutes)
             ? "Custom..."
             : "Custom: \(timeLimitTitle())..."
         let customItem = NSMenuItem(title: customTitle, action: #selector(chooseCustomSessionLimit(_:)), keyEquivalent: "")
         customItem.target = self
-        customItem.state = [0, 15, 30, 60].contains(toggleController.sessionLimitMinutes) ? .off : .on
+        customItem.state = presets.contains(toggleController.sessionLimitMinutes) ? .off : .on
         submenu.addItem(customItem)
 
         return submenu.items
@@ -584,8 +560,9 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
 
     private func batteryFloorItems() -> [NSMenuItem] {
         let submenu = NSMenu()
+        let presets = [0, 10, 20, 40, 60]
 
-        for option in [0, 20, 40] {
+        for option in presets {
             let title = option == 0 ? "Off" : "\(option)%"
             let menuItem = NSMenuItem(title: title, action: #selector(chooseBatteryFloor(_:)), keyEquivalent: "")
             menuItem.target = self
@@ -594,53 +571,51 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
             submenu.addItem(menuItem)
         }
 
-        let customTitle = [0, 20, 40].contains(toggleController.batteryFloorPercent)
+        let customTitle = presets.contains(toggleController.batteryFloorPercent)
             ? "Custom..."
             : "Custom: \(batteryLimitTitle())..."
         let customItem = NSMenuItem(title: customTitle, action: #selector(chooseCustomBatteryFloor(_:)), keyEquivalent: "")
         customItem.target = self
-        customItem.state = [0, 20, 40].contains(toggleController.batteryFloorPercent) ? .off : .on
+        customItem.state = presets.contains(toggleController.batteryFloorPercent) ? .off : .on
         submenu.addItem(customItem)
 
         return submenu.items
     }
 
-    private func promptForCustomValue(
-        title: String,
-        symbolName: String,
-        label: String,
-        defaultValue: Int,
-        minimum: Int,
-        maximum: Int,
-        step: Int,
-        unit: String
-    ) -> Int? {
+    private func promptForCustomSessionLimit() -> Int? {
         NSApp.activate(ignoringOtherApps: true)
 
-        let accessory = CustomValueAccessoryView(
-            label: label,
-            value: defaultValue,
-            minimum: minimum,
-            maximum: maximum,
-            step: step,
-            unit: unit
+        let content = CustomTimePanelContent(
+            minutes: max(toggleController.sessionLimitMinutes, 30)
         )
+        return runCustomPanel(title: "Close Timer", content: content) {
+            content.validatedMinutes
+        }
+    }
 
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = "Enter a custom value."
-        alert.icon = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
-        alert.accessoryView = accessory
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
+    private func promptForCustomBatteryFloor() -> Int? {
+        NSApp.activate(ignoringOtherApps: true)
 
-        accessory.focus()
+        let content = CustomPercentPanelContent(
+            label: "Sleep at or below",
+            percent: max(toggleController.batteryFloorPercent, 40)
+        )
+        return runCustomPanel(title: "Battery Cutoff", content: content) {
+            content.validatedPercent
+        }
+    }
 
-        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+    private func runCustomPanel<Value>(
+        title: String,
+        content: CustomPanelContentView,
+        value: () -> Value?
+    ) -> Value? {
+        let panel = CompactInputPanel(title: title, contentView: content)
 
-        guard let value = accessory.validatedValue else {
+        guard panel.runModal() else { return nil }
+        guard let value = value() else {
             presentError(
-                RestlessError.commandFailed("Enter a whole number from \(minimum) to \(maximum)."),
+                RestlessError.commandFailed(content.validationMessage),
                 title: "Restless could not save that value"
             )
             return nil
@@ -660,70 +635,184 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 }
 
-private final class CustomValueAccessoryView: NSView, NSTextFieldDelegate {
-    private let valueField = NSTextField()
-    private let stepper = NSStepper()
-    private let minimum: Int
-    private let maximum: Int
-
-    var validatedValue: Int? {
-        let value = valueField.integerValue
-        guard value >= minimum, value <= maximum else { return nil }
-        return value
+private class CustomPanelContentView: NSView {
+    var validationMessage: String {
+        "Enter a valid value."
     }
 
-    init(label: String, value: Int, minimum: Int, maximum: Int, step: Int, unit: String) {
-        self.minimum = minimum
-        self.maximum = maximum
-        super.init(frame: NSRect(x: 0, y: 0, width: 276, height: 78))
+    func focus() {}
+}
+
+private final class CompactInputPanel: NSObject {
+    private let panel: NSPanel
+    private let customContent: CustomPanelContentView
+
+    init(title: String, contentView customContent: CustomPanelContentView) {
+        self.customContent = customContent
+        let width: CGFloat = 286
+        let height = customContent.frame.height + 84
+        panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        super.init()
+
+        panel.title = title
+        panel.isReleasedWhenClosed = false
+        panel.level = .floating
+        panel.collectionBehavior = [.moveToActiveSpace]
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        customContent.frame.origin = NSPoint(x: 18, y: 62)
+        root.addSubview(customContent)
+
+        let cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancel))
+        cancelButton.bezelStyle = .rounded
+        cancelButton.frame = NSRect(x: width - 184, y: 18, width: 78, height: 28)
+        root.addSubview(cancelButton)
+
+        let saveButton = NSButton(title: "Save", target: self, action: #selector(save))
+        saveButton.bezelStyle = .rounded
+        saveButton.keyEquivalent = "\r"
+        saveButton.frame = NSRect(x: width - 96, y: 18, width: 78, height: 28)
+        root.addSubview(saveButton)
+
+        panel.contentView = root
+        panel.defaultButtonCell = saveButton.cell as? NSButtonCell
+    }
+
+    func runModal() -> Bool {
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+        customContent.focus()
+        let response = NSApp.runModal(for: panel)
+        panel.orderOut(nil)
+        return response == .OK
+    }
+
+    @objc private func save() {
+        NSApp.stopModal(withCode: .OK)
+    }
+
+    @objc private func cancel() {
+        NSApp.stopModal(withCode: .cancel)
+    }
+}
+
+private final class CustomTimePanelContent: CustomPanelContentView {
+    private let hoursField = NSTextField()
+    private let minutesField = NSTextField()
+
+    override var validationMessage: String {
+        "Enter a time from 1 minute to 12 hours."
+    }
+
+    var validatedMinutes: Int? {
+        let hours = max(0, hoursField.integerValue)
+        let minutes = max(0, minutesField.integerValue)
+        let total = hours * 60 + minutes
+        guard total >= 1, total <= 720, minutes <= 59 else { return nil }
+        return total
+    }
+
+    init(minutes: Int) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 250, height: 62))
+
+        let clamped = min(max(minutes, 1), 720)
+        let hours = clamped / 60
+        let remainder = clamped % 60
+
+        let label = NSTextField(labelWithString: "Stay awake after lid closes")
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.textColor = .labelColor
+        label.frame = NSRect(x: 0, y: 44, width: 250, height: 16)
+        addSubview(label)
+
+        configureNumberField(hoursField, value: hours)
+        hoursField.frame = NSRect(x: 0, y: 14, width: 58, height: 24)
+        addSubview(hoursField)
+
+        let hoursLabel = unitLabel("hr", x: 64)
+        addSubview(hoursLabel)
+
+        configureNumberField(minutesField, value: remainder)
+        minutesField.frame = NSRect(x: 104, y: 14, width: 58, height: 24)
+        addSubview(minutesField)
+
+        let minutesLabel = unitLabel("min", x: 168)
+        addSubview(minutesLabel)
+
+        let hint = NSTextField(labelWithString: "Max 12 hr")
+        hint.font = .systemFont(ofSize: 11)
+        hint.textColor = .secondaryLabelColor
+        hint.frame = NSRect(x: 0, y: 0, width: 250, height: 13)
+        addSubview(hint)
+    }
+
+    override func focus() {
+        window?.makeFirstResponder(hoursField)
+        hoursField.selectText(nil)
+    }
+
+    private func configureNumberField(_ field: NSTextField, value: Int) {
+        field.alignment = .right
+        field.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        field.integerValue = value
+    }
+
+    private func unitLabel(_ text: String, x: CGFloat) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.textColor = .secondaryLabelColor
+        label.frame = NSRect(x: x, y: 17, width: 34, height: 16)
+        return label
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+}
+
+private final class CustomPercentPanelContent: CustomPanelContentView {
+    private let percentField = NSTextField()
+
+    override var validationMessage: String {
+        "Enter a battery percentage from 1 to 99."
+    }
+
+    var validatedPercent: Int? {
+        let percent = percentField.integerValue
+        guard percent >= 1, percent <= 99 else { return nil }
+        return percent
+    }
+
+    init(label: String, percent: Int) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 250, height: 52))
 
         let titleLabel = NSTextField(labelWithString: label)
         titleLabel.font = .systemFont(ofSize: 12, weight: .medium)
         titleLabel.textColor = .labelColor
-        titleLabel.frame = NSRect(x: 0, y: 56, width: 276, height: 16)
+        titleLabel.frame = NSRect(x: 0, y: 34, width: 250, height: 16)
         addSubview(titleLabel)
 
-        valueField.frame = NSRect(x: 0, y: 24, width: 86, height: 26)
-        valueField.alignment = .right
-        valueField.font = .monospacedDigitSystemFont(ofSize: 14, weight: .medium)
-        valueField.integerValue = min(max(value, minimum), maximum)
-        valueField.delegate = self
-        addSubview(valueField)
+        percentField.frame = NSRect(x: 0, y: 4, width: 64, height: 24)
+        percentField.alignment = .right
+        percentField.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        percentField.integerValue = min(max(percent, 1), 99)
+        addSubview(percentField)
 
-        let unitLabel = NSTextField(labelWithString: unit)
-        unitLabel.font = .systemFont(ofSize: 13, weight: .medium)
-        unitLabel.textColor = .secondaryLabelColor
-        unitLabel.frame = NSRect(x: 94, y: 28, width: 56, height: 18)
-        addSubview(unitLabel)
-
-        stepper.frame = NSRect(x: 238, y: 22, width: 20, height: 28)
-        stepper.minValue = Double(minimum)
-        stepper.maxValue = Double(maximum)
-        stepper.increment = Double(step)
-        stepper.integerValue = valueField.integerValue
-        stepper.target = self
-        stepper.action = #selector(stepperChanged(_:))
-        addSubview(stepper)
-
-        let rangeLabel = NSTextField(labelWithString: "\(minimum)-\(maximum) \(unit)")
-        rangeLabel.font = .systemFont(ofSize: 11, weight: .regular)
-        rangeLabel.textColor = .secondaryLabelColor
-        rangeLabel.frame = NSRect(x: 0, y: 1, width: 276, height: 14)
-        addSubview(rangeLabel)
+        let percentLabel = NSTextField(labelWithString: "%")
+        percentLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        percentLabel.textColor = .secondaryLabelColor
+        percentLabel.frame = NSRect(x: 72, y: 7, width: 22, height: 16)
+        addSubview(percentLabel)
     }
 
-    func focus() {
-        window?.makeFirstResponder(valueField)
-        valueField.selectText(nil)
-    }
-
-    func controlTextDidChange(_ notification: Notification) {
-        let clamped = min(max(valueField.integerValue, minimum), maximum)
-        stepper.integerValue = clamped
-    }
-
-    @objc private func stepperChanged(_ sender: NSStepper) {
-        valueField.integerValue = sender.integerValue
+    override func focus() {
+        window?.makeFirstResponder(percentField)
+        percentField.selectText(nil)
     }
 
     required init?(coder: NSCoder) {
@@ -739,7 +828,7 @@ private final class HeaderMenuItemView: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: 292, height: 40))
 
         titleLabel.stringValue = title
-        titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
         titleLabel.textColor = .labelColor
         titleLabel.frame = NSRect(x: 18, y: 9, width: 168, height: 22)
         addSubview(titleLabel)
@@ -836,19 +925,18 @@ private final class StatusRowView: NSView {
     }
 }
 
-private final class CheckmarkMenuItemView: NSControl {
+private final class ToggleMenuItemView: NSControl {
     private let iconView = NSImageView()
-    private let boxView = NSView()
-    private let checkmarkView = NSImageView()
+    private let toggle = MenuSwitchControl(frame: NSRect(x: 228, y: 4, width: 44, height: 24))
 
-    var isChecked: Bool {
+    var isOn: Bool {
         didSet {
-            updateCheckmark()
+            toggle.isOn = isOn
         }
     }
 
-    init(title: String, symbolName: String, isChecked: Bool, target: AnyObject, action: Selector) {
-        self.isChecked = isChecked
+    init(title: String, symbolName: String, isOn: Bool, target: AnyObject, action: Selector) {
+        self.isOn = isOn
         super.init(frame: NSRect(x: 0, y: 0, width: 292, height: 32))
 
         self.target = target
@@ -866,35 +954,19 @@ private final class CheckmarkMenuItemView: NSControl {
         titleLabel.frame = NSRect(x: 52, y: 7, width: 184, height: 18)
         addSubview(titleLabel)
 
-        boxView.frame = NSRect(x: 252, y: 6, width: 20, height: 20)
-        boxView.wantsLayer = true
-        boxView.layer?.cornerRadius = 5
-        boxView.layer?.borderWidth = 1.3
-        boxView.layer?.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
-        addSubview(boxView)
-
-        checkmarkView.frame = NSRect(x: 256, y: 10, width: 12, height: 12)
-        checkmarkView.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: title)
-        checkmarkView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
-        addSubview(checkmarkView)
-
-        updateCheckmark()
-    }
-
-    private func updateCheckmark() {
-        if isChecked {
-            boxView.layer?.backgroundColor = NSColor.systemBlue.cgColor
-            boxView.layer?.borderColor = NSColor.systemBlue.cgColor
-            checkmarkView.contentTintColor = .white
-            checkmarkView.isHidden = false
-        } else {
-            boxView.layer?.backgroundColor = NSColor.clear.cgColor
-            boxView.layer?.borderColor = NSColor.tertiaryLabelColor.cgColor
-            checkmarkView.isHidden = !isChecked
-        }
+        toggle.isOn = isOn
+        toggle.target = self
+        toggle.action = #selector(toggleChanged(_:))
+        addSubview(toggle)
     }
 
     override func mouseDown(with event: NSEvent) {
+        isOn.toggle()
+        _ = target?.perform(action, with: self)
+    }
+
+    @objc private func toggleChanged(_ sender: MenuSwitchControl) {
+        isOn = sender.isOn
         _ = target?.perform(action, with: self)
     }
 
