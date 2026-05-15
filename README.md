@@ -6,7 +6,7 @@ It is designed for cases like moving around with a MacBook closed while a downlo
 
 ## Features
 
-- Menu bar only: no Dock icon and no main window.
+- Menu bar only after setup: no Dock icon and no daily main window.
 - One-click on/off control from a small display icon.
 - Closed-lid keep-awake mode using macOS `pmset`.
 - Prevents idle display sleep/screensaver while keep-awake is active, so long-running apps can keep working.
@@ -21,7 +21,9 @@ It is designed for cases like moving around with a MacBook closed while a downlo
 
 ## Download
 
-Download [`Restless.zip`](dist/Restless.zip), unzip it, and move `Restless.app` to `/Applications`.
+Download [`Restless.dmg`](dist/Restless.dmg), open it, and drag `Restless.app` onto the Applications shortcut.
+
+The zip is still available at [`Restless.zip`](dist/Restless.zip) for people who need a plain archive, but the DMG is the normal install flow.
 
 The app is not notarized yet. If macOS blocks it the first time:
 
@@ -39,19 +41,21 @@ xattr -dr com.apple.quarantine /Applications/Restless.app
 
 ## First Run
 
-1. Open `Restless.app`.
-2. Click the small display icon in the menu bar.
-3. Click **Allow Restless** in the one-time setup banner.
-4. Enter your Mac administrator password when macOS asks.
+1. Open `Restless.app` from `/Applications`.
+2. Restless shows a short overview and setup screen.
+3. Turn **Start at Login** on or off.
+4. Click **Allow**.
+5. Enter your Mac administrator password when macOS asks.
+6. Click **Done**.
 
-After that, Restless can turn closed-lid keep-awake on and off without asking for your password each time. The setup only allows these two commands:
+The password prompt lets Restless turn closed-lid keep-awake on and off later without asking every time. The passwordless rule only allows these two commands:
 
 ```bash
 /usr/bin/pmset -a disablesleep 0
 /usr/bin/pmset -a disablesleep 1
 ```
 
-It does not grant general passwordless sudo access. To start Restless automatically, turn on **Start at Login** in the same menu.
+It does not grant general passwordless sudo access. If you skip setup, Restless still runs from the menu bar and shows the one-time setup option there.
 
 ## How To Use
 
@@ -102,7 +106,7 @@ swift build
 ./script/build_and_run.sh
 ```
 
-Create a release zip:
+Create release artifacts:
 
 ```bash
 ./script/package_release.sh
@@ -111,6 +115,7 @@ Create a release zip:
 The packaged app is written to:
 
 ```bash
+dist/Restless.dmg
 dist/Restless.zip
 ```
 

@@ -11,6 +11,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     private var isAutomaticSleepInProgress = false
     private var requestedSleepDisabled: Bool?
     private var isSleepToggleCommandRunning = false
+    private var onboardingWindowController: OnboardingWindowController?
     private weak var visibleHeaderView: HeaderMenuItemView?
     private weak var visibleStatusRowView: StatusRowView?
 
@@ -31,6 +32,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
         runMonitoringPass(enforceLimits: false)
         startMonitoring()
         startSystemEventMonitoring()
+        showOnboardingIfNeeded()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -44,6 +46,11 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        guard isInstalledInApplications else {
+            showOnboarding()
+            return
+        }
+
         showMenu()
     }
 
@@ -212,6 +219,105 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
 
     private func handleSettingsChange() {
         runMonitoringPass(enforceLimits: true)
+    }
+
+    private func showOnboardingIfNeeded() {
+        guard isInstalledInApplications else {
+            showOnboarding()
+            return
+        }
+
+        if UserDefaults.standard.bool(forKey: "restless.onboardingComplete"),
+           toggleController.isPasswordlessSetupInstalled {
+            return
+        }
+
+        if isInstalledInApplications,
+           toggleController.isPasswordlessSetupInstalled {
+            UserDefaults.standard.set(true, forKey: "restless.onboardingComplete")
+            return
+        }
+
+        showOnboarding()
+    }
+
+    private func showOnboarding() {
+        if let onboardingWindowController {
+            onboardingWindowController.show()
+            return
+        }
+
+        let controller = OnboardingWindowController(
+            isInstalledInApplications: isInstalledInApplications,
+            isLaunchAtLoginEnabled: launchAtLoginController.isEnabled,
+            isPasswordlessInstalled: toggleController.isPasswordlessSetupInstalled,
+            setLaunchAtLogin: { [weak self] enabled in
+                self?.setLaunchAtLoginForOnboarding(enabled) ?? .failure("Restless could not update startup.")
+            },
+            runSetup: { [weak self] completion in
+                self?.runFirstRunSetup(completion: completion)
+            },
+            finish: { [weak self] in
+                UserDefaults.standard.set(true, forKey: "restless.onboardingComplete")
+                self?.onboardingWindowController?.close()
+                self?.onboardingWindowController = nil
+            }
+        )
+        onboardingWindowController = controller
+        controller.show()
+    }
+
+    private var isInstalledInApplications: Bool {
+        let bundlePath = Bundle.main.bundleURL.standardizedFileURL.path
+        return bundlePath == "/Applications/Restless.app"
+    }
+
+    private func setLaunchAtLoginForOnboarding(_ enabled: Bool) -> OnboardingActionResult {
+        do {
+            try launchAtLoginController.setEnabled(enabled)
+            return .success
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+    }
+
+    private func runFirstRunSetup(completion: @escaping (OnboardingSetupResult) -> Void) {
+        guard isInstalledInApplications else {
+            completion(
+                .failure("Move Restless.app to Applications, then open it from there to finish setup.")
+            )
+            return
+        }
+
+        guard !toggleController.isPasswordlessSetupInstalled else {
+            UserDefaults.standard.set(true, forKey: "restless.onboardingComplete")
+            runMonitoringPass(enforceLimits: true)
+            completion(
+                .success(
+                    launchAtLoginEnabled: launchAtLoginController.isEnabled,
+                    passwordlessInstalled: toggleController.isPasswordlessSetupInstalled
+                )
+            )
+            return
+        }
+
+        toggleController.installPasswordlessToggle { [weak self] result in
+            guard let self else { return }
+            self.runMonitoringPass(enforceLimits: true)
+
+            switch result {
+            case .success:
+                UserDefaults.standard.set(true, forKey: "restless.onboardingComplete")
+                completion(
+                    .success(
+                        launchAtLoginEnabled: self.launchAtLoginController.isEnabled,
+                        passwordlessInstalled: self.toggleController.isPasswordlessSetupInstalled
+                    )
+                )
+            case .failure(let error):
+                completion(.failure(error.localizedDescription))
+            }
+        }
     }
 
     private func runMonitoringPass(enforceLimits: Bool) {
