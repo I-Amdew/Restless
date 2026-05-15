@@ -23,11 +23,11 @@ It is designed for cases like moving around with a MacBook closed while a downlo
 
 Download the latest DMG from GitHub:
 
-[`Restless.dmg`](https://github.com/I-Amdew/Restless/raw/main/dist/Restless.dmg)
+[`Restless.dmg`](https://github.com/I-Amdew/Restless/releases/latest/download/Restless.dmg)
 
 Open it, then drag `Restless.app` onto the Applications shortcut.
 
-The zip is still available at [`Restless.zip`](https://github.com/I-Amdew/Restless/raw/main/dist/Restless.zip) for people who need a plain archive, but the DMG is the normal install flow.
+The zip is still available at [`Restless.zip`](https://github.com/I-Amdew/Restless/releases/latest/download/Restless.zip) for people who need a plain archive, but the DMG is the normal install flow.
 
 The app is not notarized yet. If macOS blocks it the first time:
 

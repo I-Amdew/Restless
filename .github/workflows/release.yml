@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish, for example v0.1.2. Leave blank to use the current ref name.'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Build and publish DMG
+    runs-on: macos-15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build Restless DMG and zip
+        shell: bash
+        run: ./script/package_release.sh
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          cat > release-notes.md <<'NOTES'
+          ## Install
+
+          Download `Restless.dmg`, open it, then drag `Restless.app` into Applications.
+
+          On first launch, Restless walks you through the two setup steps it needs: allowing passwordless keep-awake toggles for its exact `pmset` command and enabling Start at Login if you want it.
+
+          ## Included downloads
+
+          - `Restless.dmg` - normal Mac installer image
+          - `Restless.zip` - plain archive fallback
+
+          The app is not notarized yet. If macOS blocks it the first time, right-click `Restless.app` in Applications and choose Open.
+          NOTES
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "${{ steps.release.outputs.tag }}" >/dev/null 2>&1; then
+            gh release upload "${{ steps.release.outputs.tag }}" dist/Restless.dmg dist/Restless.zip --clobber
+          else
+            gh release create "${{ steps.release.outputs.tag }}" \
+              dist/Restless.dmg \
+              dist/Restless.zip \
+              --title "Restless ${{ steps.release.outputs.tag }}" \
+              --notes-file release-notes.md \
+              --latest
+          fi
