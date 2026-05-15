@@ -42,11 +42,11 @@ xattr -dr com.apple.quarantine /Applications/Restless.app
 ## First Run
 
 1. Open `Restless.app` from `/Applications`.
-2. Restless shows a short overview and setup screen.
-3. Turn **Start at Login** on or off.
-4. Click **Allow**.
-5. Enter your Mac administrator password when macOS asks.
-6. Click **Done**.
+2. Restless shows a short overview and two setup tasks.
+3. Click **Allow** next to **Allow keep-awake control**.
+4. Enter your Mac administrator password when macOS asks.
+5. Click **Enable** next to **Start at Login**.
+6. Click **Done** after both tasks show checkmarks.
 
 The password prompt lets Restless turn closed-lid keep-awake on and off later without asking every time. The passwordless rule only allows these two commands:
 
