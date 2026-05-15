@@ -9,7 +9,8 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     private var limitTimer: Timer?
     private var powerSourceRunLoopSource: CFRunLoopSource?
     private var isAutomaticSleepInProgress = false
-    private var pendingEnabledOverride: Bool?
+    private var requestedSleepDisabled: Bool?
+    private var isSleepToggleCommandRunning = false
     private weak var visibleHeaderView: HeaderMenuItemView?
     private weak var visibleStatusRowView: StatusRowView?
 
@@ -49,7 +50,6 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     @objc private func toggleFromMenu(_ sender: Any) {
         let requestedEnabled = (sender as? MenuSwitchControl)?.isOn ?? !effectiveEnabled
         setSleepDisabled(requestedEnabled)
-        reopenMenuSoon()
     }
 
     @objc private func chooseSessionLimit(_ sender: NSMenuItem) {
@@ -105,13 +105,30 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     private func setSleepDisabled(_ enabled: Bool) {
-        pendingEnabledOverride = enabled
-        updateStatusItem(isWorking: true)
+        requestedSleepDisabled = enabled
+        updateStatusItem()
         refreshVisibleMenu()
+        runNextSleepToggleCommandIfNeeded()
+    }
 
-        toggleController.setSleepDisabled(enabled) { [weak self] result in
+    private func runNextSleepToggleCommandIfNeeded() {
+        guard !isSleepToggleCommandRunning, let requestedSleepDisabled else { return }
+
+        isSleepToggleCommandRunning = true
+        let commandEnabled = requestedSleepDisabled
+
+        toggleController.setSleepDisabled(commandEnabled) { [weak self] result in
             guard let self else { return }
-            self.pendingEnabledOverride = nil
+            self.isSleepToggleCommandRunning = false
+
+            guard self.requestedSleepDisabled == commandEnabled else {
+                self.updateStatusItem()
+                self.refreshVisibleMenu()
+                self.runNextSleepToggleCommandIfNeeded()
+                return
+            }
+
+            self.requestedSleepDisabled = nil
             self.runMonitoringPass(enforceLimits: true)
 
             if case .failure(let error) = result {
@@ -269,7 +286,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     private var statusIconTintColor: NSColor? {
-        if toggleController.shouldUseWarningIcon {
+        if shouldShowWarningState {
             return .systemOrange
         }
 
@@ -281,11 +298,11 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     private var effectiveEnabled: Bool {
-        pendingEnabledOverride ?? toggleController.isEnabled
+        requestedSleepDisabled ?? toggleController.isEnabled
     }
 
     private var statusToolTip: String {
-        guard toggleController.isStatusKnown else {
+        guard requestedSleepDisabled != nil || toggleController.isStatusKnown else {
             return "Restless: checking sleep status"
         }
 
@@ -391,7 +408,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     private var statusTitle: String {
-        guard toggleController.isStatusKnown else {
+        guard requestedSleepDisabled != nil || toggleController.isStatusKnown else {
             return "Checking status"
         }
 
@@ -407,6 +424,10 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     private var statusDetail: String {
+        if let requestedSleepDisabled {
+            return requestedSleepDisabled ? "Applying keep-awake..." : "Restoring normal sleep..."
+        }
+
         if isPausedByBatteryCutoff {
             return "At/below \(batteryLimitTitle()); keep-awake paused"
         }
@@ -419,7 +440,7 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     private var statusAccentColor: NSColor {
-        if toggleController.shouldUseWarningIcon {
+        if shouldShowWarningState {
             return .systemOrange
         }
 
@@ -437,11 +458,15 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
     }
 
     private var isPausedByBatteryCutoff: Bool {
-        toggleController.isEnabled && toggleController.isBatteryCutoffReached
+        effectiveEnabled && toggleController.isBatteryCutoffReached
     }
 
     private var isPausedAfterClosedLidLimit: Bool {
-        toggleController.isEnabled && toggleController.isWaitingForNextLidOpen
+        effectiveEnabled && toggleController.isWaitingForNextLidOpen
+    }
+
+    private var shouldShowWarningState: Bool {
+        effectiveEnabled && (toggleController.isBatteryCutoffReached || toggleController.isWaitingForNextLidOpen)
     }
 
     private func splitMenuMetric(_ value: String) -> (title: String, detail: String) {
