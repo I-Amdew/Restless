@@ -17,6 +17,8 @@ final class SleepToggleController {
     private var systemSleepAssertionID = IOPMAssertionID(0)
     private var clamshellSleepAssertionID = IOPMAssertionID(0)
     private var displaySleepAssertionID = IOPMAssertionID(0)
+    private var networkClientAssertionID = IOPMAssertionID(0)
+    private var caffeinateProcess: Process?
 
     var closedSessionMetricsTitle: String? {
         guard isLidClosed, let closedSince else {
@@ -406,6 +408,9 @@ final class SleepToggleController {
     }
 
     private func createActivityAssertionsIfNeeded() {
+        startCaffeinateIfNeeded()
+        refreshNetworkClientActivity()
+
         if systemSleepAssertionID == 0 {
             var assertionID = IOPMAssertionID(0)
             let result = IOPMAssertionCreateWithName(
@@ -447,6 +452,13 @@ final class SleepToggleController {
     }
 
     private func releaseActivityAssertions() {
+        stopCaffeinateIfNeeded()
+
+        if networkClientAssertionID != 0 {
+            IOPMAssertionRelease(networkClientAssertionID)
+            networkClientAssertionID = 0
+        }
+
         if systemSleepAssertionID != 0 {
             IOPMAssertionRelease(systemSleepAssertionID)
             systemSleepAssertionID = 0
@@ -461,6 +473,53 @@ final class SleepToggleController {
             IOPMAssertionRelease(displaySleepAssertionID)
             displaySleepAssertionID = 0
         }
+    }
+
+    private func refreshNetworkClientActivity() {
+        var assertionID = networkClientAssertionID
+        let result = IOPMDeclareNetworkClientActivity(
+            "Restless is keeping network clients active" as CFString,
+            &assertionID
+        )
+
+        if result == kIOReturnSuccess {
+            networkClientAssertionID = assertionID
+        }
+    }
+
+    private func startCaffeinateIfNeeded() {
+        if let caffeinateProcess, caffeinateProcess.isRunning {
+            return
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
+        process.arguments = [
+            "-d",
+            "-i",
+            "-m",
+            "-s",
+            "-w",
+            "\(ProcessInfo.processInfo.processIdentifier)"
+        ]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            caffeinateProcess = process
+        } catch {
+            caffeinateProcess = nil
+        }
+    }
+
+    private func stopCaffeinateIfNeeded() {
+        guard let process = caffeinateProcess else { return }
+
+        caffeinateProcess = nil
+        guard process.isRunning else { return }
+
+        process.terminate()
     }
 
     private func parseDisableSleepState(from output: String) -> Bool? {
