@@ -365,8 +365,21 @@ final class SleepToggleController {
     }
 
     func requestSystemSleep() {
+        releaseActivityAssertions()
+
         DispatchQueue.global(qos: .utility).async {
-            _ = self.runPlainCommand("/usr/bin/pmset", arguments: ["sleepnow"])
+            Thread.sleep(forTimeInterval: 0.75)
+
+            var didRequestSleep = false
+            let powerConnection = IOPMFindPowerManagement(mach_port_t(MACH_PORT_NULL))
+            if powerConnection != 0 {
+                didRequestSleep = IOPMSleepSystem(powerConnection) == kIOReturnSuccess
+                IOServiceClose(powerConnection)
+            }
+
+            if !didRequestSleep {
+                _ = self.runPlainCommand("/usr/bin/pmset", arguments: ["sleepnow"])
+            }
         }
     }
 
@@ -520,6 +533,7 @@ final class SleepToggleController {
         guard process.isRunning else { return }
 
         process.terminate()
+        process.waitUntilExit()
     }
 
     private func parseDisableSleepState(from output: String) -> Bool? {
