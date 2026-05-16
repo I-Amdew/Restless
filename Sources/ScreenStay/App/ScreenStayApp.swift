@@ -210,6 +210,12 @@ final class RestlessApp: NSObject, NSApplicationDelegate {
 
     @objc private func systemStateChanged(_ notification: Notification) {
         runMonitoringPass(enforceLimits: true)
+
+        for delay in [0.75, 2.0, 5.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.runMonitoringPass(enforceLimits: true)
+            }
+        }
     }
 
     private func handleSettingsChange() {

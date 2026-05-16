@@ -70,7 +70,7 @@ It does not grant general passwordless sudo access. If you skip setup, Restless 
 
 When Restless is on, it keeps the Mac awake while closed. It holds macOS system-sleep, idle, display, disk, and network-client activity assertions, plus a scoped caffeinate helper, so lid-close, screensaver, and idle paths are much less likely to pause terminal or AI-agent work. When the lid closes, Restless dims the display brightness instead of calling display sleep. If the close timer or battery cutoff is reached, Restless lets the Mac sleep for that closed-lid session but stays enabled for the next time you close the lid.
 
-Restless watches macOS power-source and wake events, so the menu updates when the battery changes, when the close timer expires, and when the lid opens again. The close timer resets every time a new closed-lid session starts. If the battery is already at or below your cutoff, the menu bar icon turns orange to show that closed-lid keep-awake will pause until the battery is above the limit or the cutoff is changed.
+Restless watches macOS power-source and wake events, then re-checks shortly after wake so keep-awake restores when the lid opens again. The close timer resets every time a new closed-lid session starts. If the battery is already at or below your cutoff, the menu bar icon turns orange to show that closed-lid keep-awake will pause until the battery is above the limit or the cutoff is changed.
 
 The menu shows:
 
